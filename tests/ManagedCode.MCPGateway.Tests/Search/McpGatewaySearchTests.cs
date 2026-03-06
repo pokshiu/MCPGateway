@@ -131,6 +131,81 @@ public sealed class McpGatewaySearchTests
     }
 
     [TUnit.Core.Test]
+    public async Task BuildIndexAsync_RegeneratesStoredToolEmbeddingsWhenGeneratorFingerprintChanges()
+    {
+        var embeddingStore = new TestToolEmbeddingStore();
+        var firstEmbeddingGenerator = new TestEmbeddingGenerator(new TestEmbeddingGeneratorOptions
+        {
+            Metadata = new EmbeddingGeneratorMetadata(
+                "ManagedCode.MCPGateway.Tests",
+                new Uri("https://example.test"),
+                "test-embedding-a",
+                21)
+        });
+
+        await using (var firstServiceProvider = GatewayTestServiceProviderFactory.Create(
+                         ConfigureSearchTools,
+                         firstEmbeddingGenerator,
+                         embeddingStore))
+        {
+            var gateway = firstServiceProvider.GetRequiredService<IMcpGateway>();
+            await gateway.BuildIndexAsync();
+        }
+
+        var secondEmbeddingGenerator = new TestEmbeddingGenerator(new TestEmbeddingGeneratorOptions
+        {
+            Metadata = new EmbeddingGeneratorMetadata(
+                "ManagedCode.MCPGateway.Tests",
+                new Uri("https://example.test"),
+                "test-embedding-b",
+                21)
+        });
+
+        await using var secondServiceProvider = GatewayTestServiceProviderFactory.Create(
+            ConfigureSearchTools,
+            secondEmbeddingGenerator,
+            embeddingStore);
+        var secondGateway = secondServiceProvider.GetRequiredService<IMcpGateway>();
+
+        var secondBuildResult = await secondGateway.BuildIndexAsync();
+
+        await Assert.That(secondBuildResult.VectorizedToolCount).IsEqualTo(2);
+        await Assert.That(secondEmbeddingGenerator.Calls.Count).IsEqualTo(1);
+        await Assert.That(secondEmbeddingGenerator.Calls[0].Count).IsEqualTo(2);
+        await Assert.That(embeddingStore.UpsertCalls.Count).IsEqualTo(2);
+        await Assert.That(embeddingStore.UpsertCalls[1].Count).IsEqualTo(2);
+    }
+
+    [TUnit.Core.Test]
+    public async Task BuildIndexAsync_DisablesVectorSearchWhenStoreHasVectorsButQueryGeneratorIsMissing()
+    {
+        var embeddingStore = new McpGatewayInMemoryToolEmbeddingStore();
+        var initialEmbeddingGenerator = new TestEmbeddingGenerator();
+
+        await using (var initialServiceProvider = GatewayTestServiceProviderFactory.Create(
+                         ConfigureSearchTools,
+                         initialEmbeddingGenerator,
+                         embeddingStore))
+        {
+            var gateway = initialServiceProvider.GetRequiredService<IMcpGateway>();
+            await gateway.BuildIndexAsync();
+        }
+
+        await using var secondServiceProvider = GatewayTestServiceProviderFactory.Create(
+            ConfigureSearchTools,
+            embeddingStore: embeddingStore);
+        var secondGateway = secondServiceProvider.GetRequiredService<IMcpGateway>();
+
+        var buildResult = await secondGateway.BuildIndexAsync();
+        var searchResult = await secondGateway.SearchAsync("github pull requests", maxResults: 1);
+
+        await Assert.That(buildResult.VectorizedToolCount).IsEqualTo(2);
+        await Assert.That(buildResult.IsVectorSearchEnabled).IsFalse();
+        await Assert.That(buildResult.Diagnostics.Any(static diagnostic => diagnostic.Code == "embedding_generator_missing")).IsTrue();
+        await Assert.That(searchResult.RankingMode).IsEqualTo("lexical");
+    }
+
+    [TUnit.Core.Test]
     public async Task BuildIndexAsync_GeneratesAndPersistsOnlyMissingStoredToolEmbeddings()
     {
         var embeddingStore = new TestToolEmbeddingStore();

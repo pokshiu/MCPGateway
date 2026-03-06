@@ -32,7 +32,8 @@ internal sealed class TestEmbeddingGenerator(TestEmbeddingGeneratorOptions? opti
 
     private readonly TestEmbeddingGeneratorOptions _options = options ?? new();
     private readonly EmbeddingGeneratorMetadata _metadata =
-        new("ManagedCode.MCPGateway.Tests", new Uri("https://example.test"), "test-embedding", Vocabulary.Length);
+        (options ?? new()).Metadata
+        ?? new("ManagedCode.MCPGateway.Tests", new Uri("https://example.test"), "test-embedding", Vocabulary.Length);
 
     public List<IReadOnlyList<string>> Calls { get; } = [];
 
@@ -116,6 +117,8 @@ internal sealed class TestEmbeddingGenerator(TestEmbeddingGeneratorOptions? opti
 
 internal sealed class TestEmbeddingGeneratorOptions
 {
+    public EmbeddingGeneratorMetadata? Metadata { get; init; }
+
     public Func<string, bool>? ThrowOnInput { get; init; }
 
     public Func<string, bool>? ReturnZeroVectorOnInput { get; init; }

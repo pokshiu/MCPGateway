@@ -44,7 +44,7 @@ public sealed class McpGateway(
     private const string SourceLoadFailedMessageTemplate = "Failed to load tools from source '{0}': {1}";
     private const string DuplicateToolIdMessageTemplate = "Skipped duplicate tool id '{0}'.";
     private const string EmbeddingCountMismatchMessageTemplate = "Embedding generation returned {0} vectors for {1} tools.";
-    private const string EmbeddingGeneratorMissingMessage = "No keyed or unkeyed IEmbeddingGenerator<string, Embedding<float>> is registered. Lexical fallback only.";
+    private const string EmbeddingGeneratorMissingMessage = "No keyed or unkeyed IEmbeddingGenerator<string, Embedding<float>> is registered. Stored tool embeddings may be reused, but search falls back lexically without a query embedding generator.";
     private const string EmbeddingFailedMessageTemplate = "Embedding generation failed: {0}";
     private const string EmbeddingStoreLoadFailedMessageTemplate = "Loading stored tool embeddings failed: {0}";
     private const string EmbeddingStoreSaveFailedMessageTemplate = "Persisting generated tool embeddings failed: {0}";
@@ -80,6 +80,8 @@ public sealed class McpGateway(
     private const string ContextPrefix = "context: ";
     private const string PluralSuffixIes = "ies";
     private const string PluralSuffixEs = "es";
+    private const string EmbeddingGeneratorFingerprintUnknownComponent = "unknown";
+    private const string EmbeddingGeneratorFingerprintComponentSeparator = "\n";
 
     private static readonly char[] TokenSeparators =
     [
@@ -285,16 +287,21 @@ public sealed class McpGateway(
             }
 
             var vectorizedToolCount = 0;
+            var isVectorSearchEnabled = false;
             if (entries.Count > 0)
             {
                 await using var embeddingGeneratorLease = ResolveEmbeddingGenerator();
                 await using var embeddingStoreLease = ResolveToolEmbeddingStore();
                 var embeddingGenerator = embeddingGeneratorLease.Generator;
+                var embeddingGeneratorFingerprint = ResolveEmbeddingGeneratorFingerprint(embeddingGenerator);
                 var embeddingStore = embeddingStoreLease.Store;
                 var storeCandidates = entries
                     .Select((entry, index) => new ToolEmbeddingCandidate(
                         index,
-                        new McpGatewayToolEmbeddingLookup(entry.Descriptor.ToolId, ComputeDocumentHash(entry.Document)),
+                        new McpGatewayToolEmbeddingLookup(
+                            entry.Descriptor.ToolId,
+                            ComputeDocumentHash(entry.Document),
+                            embeddingGeneratorFingerprint),
                         entry.Descriptor.SourceId,
                         entry.Descriptor.ToolName))
                     .ToList();
@@ -306,13 +313,12 @@ public sealed class McpGateway(
                         var storedEmbeddings = await embeddingStore.GetAsync(
                             storeCandidates.Select(static candidate => candidate.Lookup).ToList(),
                             cancellationToken);
-                        var storedEmbeddingsByLookup = storedEmbeddings
-                            .GroupBy(static embedding => new McpGatewayToolEmbeddingLookup(embedding.ToolId, embedding.DocumentHash))
-                            .ToDictionary(static group => group.Key, static group => group.Last());
 
                         foreach (var candidate in storeCandidates)
                         {
-                            if (storedEmbeddingsByLookup.TryGetValue(candidate.Lookup, out var storedEmbedding))
+                            var storedEmbedding = storedEmbeddings.LastOrDefault(embedding =>
+                                MatchesStoredEmbedding(candidate.Lookup, embedding));
+                            if (storedEmbedding is not null)
                             {
                                 ApplyEmbedding(entries, candidate.Index, storedEmbedding.Vector, ref vectorizedToolCount);
                             }
@@ -330,6 +336,13 @@ public sealed class McpGateway(
                 var missingCandidates = storeCandidates
                     .Where(candidate => entries[candidate.Index].Magnitude <= double.Epsilon)
                     .ToList();
+
+                if (embeddingGenerator is null && vectorizedToolCount > 0)
+                {
+                    diagnostics.Add(new McpGatewayDiagnostic(
+                        EmbeddingGeneratorMissingDiagnosticCode,
+                        EmbeddingGeneratorMissingMessage));
+                }
 
                 if (missingCandidates.Count > 0)
                 {
@@ -355,6 +368,7 @@ public sealed class McpGateway(
                                             candidate.SourceId,
                                             candidate.ToolName,
                                             candidate.Lookup.DocumentHash,
+                                            candidate.Lookup.EmbeddingGeneratorFingerprint,
                                             vector));
                                     }
                                 }
@@ -400,6 +414,8 @@ public sealed class McpGateway(
                         _logger.LogWarning(ex, EmbeddingGenerationFailedLogMessage);
                     }
                 }
+
+                isVectorSearchEnabled = vectorizedToolCount > 0 && embeddingGenerator is not null;
             }
 
             var snapshot = new ToolCatalogSnapshot(
@@ -407,7 +423,7 @@ public sealed class McpGateway(
                     .OrderBy(static item => item.Descriptor.ToolName, StringComparer.OrdinalIgnoreCase)
                     .ThenBy(static item => item.Descriptor.SourceId, StringComparer.OrdinalIgnoreCase)
                     .ToList(),
-                vectorizedToolCount > 0);
+                isVectorSearchEnabled);
 
             lock (_gate)
             {
@@ -1001,6 +1017,37 @@ public sealed class McpGateway(
 
     private static string ComputeDocumentHash(string value)
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    private static bool MatchesStoredEmbedding(
+        McpGatewayToolEmbeddingLookup lookup,
+        McpGatewayToolEmbedding embedding)
+        => string.Equals(embedding.ToolId, lookup.ToolId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(embedding.DocumentHash, lookup.DocumentHash, StringComparison.Ordinal)
+            && (lookup.EmbeddingGeneratorFingerprint is null
+                || string.Equals(
+                    embedding.EmbeddingGeneratorFingerprint,
+                    lookup.EmbeddingGeneratorFingerprint,
+                    StringComparison.Ordinal));
+
+    private static string? ResolveEmbeddingGeneratorFingerprint(
+        IEmbeddingGenerator<string, Embedding<float>>? embeddingGenerator)
+    {
+        if (embeddingGenerator is null)
+        {
+            return null;
+        }
+
+        var metadata = embeddingGenerator.GetService(typeof(EmbeddingGeneratorMetadata)) as EmbeddingGeneratorMetadata;
+        var generatorTypeName = embeddingGenerator.GetType().FullName ?? embeddingGenerator.GetType().Name;
+
+        return ComputeDocumentHash(string.Join(
+            EmbeddingGeneratorFingerprintComponentSeparator,
+            metadata?.ProviderName ?? EmbeddingGeneratorFingerprintUnknownComponent,
+            metadata?.ProviderUri?.AbsoluteUri ?? EmbeddingGeneratorFingerprintUnknownComponent,
+            metadata?.DefaultModelId ?? EmbeddingGeneratorFingerprintUnknownComponent,
+            metadata?.DefaultModelDimensions?.ToString(CultureInfo.InvariantCulture) ?? EmbeddingGeneratorFingerprintUnknownComponent,
+            generatorTypeName ?? EmbeddingGeneratorFingerprintUnknownComponent));
+    }
 
     private static string BuildEffectiveSearchQuery(McpGatewaySearchRequest request)
     {

@@ -5,4 +5,5 @@ public sealed record McpGatewayToolEmbedding(
     string SourceId,
     string ToolName,
     string DocumentHash,
+    string? EmbeddingGeneratorFingerprint,
     float[] Vector);

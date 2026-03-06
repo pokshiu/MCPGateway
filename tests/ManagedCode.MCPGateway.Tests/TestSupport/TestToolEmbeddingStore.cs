@@ -4,7 +4,7 @@ namespace ManagedCode.MCPGateway.Tests;
 
 internal sealed class TestToolEmbeddingStore : IMcpGatewayToolEmbeddingStore
 {
-    private readonly Dictionary<McpGatewayToolEmbeddingLookup, McpGatewayToolEmbedding> _embeddings = [];
+    private readonly Dictionary<StoreKey, McpGatewayToolEmbedding> _embeddings = [];
 
     public List<IReadOnlyList<McpGatewayToolEmbeddingLookup>> GetCalls { get; } = [];
 
@@ -18,10 +18,14 @@ internal sealed class TestToolEmbeddingStore : IMcpGatewayToolEmbeddingStore
 
         GetCalls.Add(lookups.ToList());
 
-        var matches = lookups
-            .Where(_embeddings.ContainsKey)
-            .Select(lookup => Clone(_embeddings[lookup]))
-            .ToList();
+        var matches = new List<McpGatewayToolEmbedding>(lookups.Count);
+        foreach (var lookup in lookups)
+        {
+            if (TryGetEmbedding(lookup, out var embedding))
+            {
+                matches.Add(Clone(embedding));
+            }
+        }
 
         return Task.FromResult<IReadOnlyList<McpGatewayToolEmbedding>>(matches);
     }
@@ -39,7 +43,7 @@ internal sealed class TestToolEmbeddingStore : IMcpGatewayToolEmbeddingStore
 
         foreach (var embedding in clonedBatch)
         {
-            _embeddings[new McpGatewayToolEmbeddingLookup(embedding.ToolId, embedding.DocumentHash)] = embedding;
+            _embeddings[StoreKey.FromEmbedding(embedding)] = embedding;
         }
 
         return Task.CompletedTask;
@@ -48,7 +52,7 @@ internal sealed class TestToolEmbeddingStore : IMcpGatewayToolEmbeddingStore
     public void Remove(string toolId)
     {
         var keys = _embeddings.Keys
-            .Where(lookup => string.Equals(lookup.ToolId, toolId, StringComparison.OrdinalIgnoreCase))
+            .Where(key => string.Equals(key.NormalizedToolId, NormalizeToolId(toolId), StringComparison.Ordinal))
             .ToList();
 
         foreach (var key in keys)
@@ -62,4 +66,56 @@ internal sealed class TestToolEmbeddingStore : IMcpGatewayToolEmbeddingStore
         {
             Vector = [.. embedding.Vector]
         };
+
+    private bool TryGetEmbedding(
+        McpGatewayToolEmbeddingLookup lookup,
+        out McpGatewayToolEmbedding embedding)
+    {
+        var storeKey = StoreKey.FromLookup(lookup);
+        if (lookup.EmbeddingGeneratorFingerprint is not null)
+        {
+            return _embeddings.TryGetValue(storeKey, out embedding!);
+        }
+
+        foreach (var (key, value) in _embeddings)
+        {
+            if (key.Matches(storeKey))
+            {
+                embedding = value;
+                return true;
+            }
+        }
+
+        embedding = default!;
+        return false;
+    }
+
+    private static string NormalizeToolId(string toolId) => toolId.ToUpperInvariant();
+
+    private readonly record struct StoreKey(
+        string NormalizedToolId,
+        string DocumentHash,
+        string? EmbeddingGeneratorFingerprint)
+    {
+        public static StoreKey FromLookup(McpGatewayToolEmbeddingLookup lookup)
+            => new(
+                NormalizeToolId(lookup.ToolId),
+                lookup.DocumentHash,
+                lookup.EmbeddingGeneratorFingerprint);
+
+        public static StoreKey FromEmbedding(McpGatewayToolEmbedding embedding)
+            => new(
+                NormalizeToolId(embedding.ToolId),
+                embedding.DocumentHash,
+                embedding.EmbeddingGeneratorFingerprint);
+
+        public bool Matches(StoreKey other)
+            => string.Equals(NormalizedToolId, other.NormalizedToolId, StringComparison.Ordinal)
+                && string.Equals(DocumentHash, other.DocumentHash, StringComparison.Ordinal)
+                && (other.EmbeddingGeneratorFingerprint is null
+                    || string.Equals(
+                        EmbeddingGeneratorFingerprint,
+                        other.EmbeddingGeneratorFingerprint,
+                        StringComparison.Ordinal));
+    }
 }

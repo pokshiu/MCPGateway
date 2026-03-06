@@ -238,7 +238,7 @@ During `BuildIndexAsync()` the gateway:
 - generates embeddings only for tools that are missing in the store
 - upserts the newly generated vectors back into the store
 
-This avoids recalculating tool embeddings on every rebuild while still refreshing them automatically when the descriptor document changes. Query embeddings are still generated at search time from the registered `IEmbeddingGenerator<string, Embedding<float>>`.
+This avoids recalculating tool embeddings on every rebuild while still refreshing them automatically when the descriptor document changes. Stored vectors are scoped to both the descriptor hash and the resolved embedding-generator fingerprint, so changing the provider or model automatically forces regeneration. Query embeddings are still generated at search time from the registered `IEmbeddingGenerator<string, Embedding<float>>`.
 
 ## Supported Sources
 

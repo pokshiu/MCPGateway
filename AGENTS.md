@@ -190,6 +190,7 @@ If no new rule is detected -> do not update the file.
 - Reusable library design over app-specific glue
 - Search + execute flows covered by automated tests
 - Clean root packaging and CI setup
+- Direct fixes over preserving legacy compatibility paths when cleanup or review-driven corrections are requested
 
 ### Dislikes
 
