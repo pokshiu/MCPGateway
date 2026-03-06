@@ -95,6 +95,77 @@ public sealed class McpGatewaySearchTests
     }
 
     [TUnit.Core.Test]
+    public async Task BuildIndexAsync_ReusesStoredToolEmbeddingsOnNextBuild()
+    {
+        var embeddingStore = new McpGatewayInMemoryToolEmbeddingStore();
+        var firstEmbeddingGenerator = new TestEmbeddingGenerator();
+
+        await using (var firstServiceProvider = GatewayTestServiceProviderFactory.Create(
+                         ConfigureSearchTools,
+                         firstEmbeddingGenerator,
+                         embeddingStore))
+        {
+            var gateway = firstServiceProvider.GetRequiredService<IMcpGateway>();
+            var buildResult = await gateway.BuildIndexAsync();
+
+            await Assert.That(buildResult.VectorizedToolCount).IsEqualTo(2);
+            await Assert.That(firstEmbeddingGenerator.Calls.Count).IsEqualTo(1);
+        }
+
+        var secondEmbeddingGenerator = new TestEmbeddingGenerator(new TestEmbeddingGeneratorOptions
+        {
+            ThrowOnInput = static _ => true
+        });
+
+        await using var secondServiceProvider = GatewayTestServiceProviderFactory.Create(
+            ConfigureSearchTools,
+            secondEmbeddingGenerator,
+            embeddingStore);
+        var secondGateway = secondServiceProvider.GetRequiredService<IMcpGateway>();
+
+        var secondBuildResult = await secondGateway.BuildIndexAsync();
+
+        await Assert.That(secondBuildResult.VectorizedToolCount).IsEqualTo(2);
+        await Assert.That(secondBuildResult.Diagnostics.Any(static diagnostic => diagnostic.Code == "embedding_failed")).IsFalse();
+        await Assert.That(secondEmbeddingGenerator.Calls.Count).IsEqualTo(0);
+    }
+
+    [TUnit.Core.Test]
+    public async Task BuildIndexAsync_GeneratesAndPersistsOnlyMissingStoredToolEmbeddings()
+    {
+        var embeddingStore = new TestToolEmbeddingStore();
+        var initialEmbeddingGenerator = new TestEmbeddingGenerator();
+
+        await using (var initialServiceProvider = GatewayTestServiceProviderFactory.Create(
+                         ConfigureSearchTools,
+                         initialEmbeddingGenerator,
+                         embeddingStore))
+        {
+            var gateway = initialServiceProvider.GetRequiredService<IMcpGateway>();
+            await gateway.BuildIndexAsync();
+        }
+
+        embeddingStore.Remove("local:weather_search_forecast");
+
+        var incrementalEmbeddingGenerator = new TestEmbeddingGenerator();
+        await using var incrementalServiceProvider = GatewayTestServiceProviderFactory.Create(
+            ConfigureSearchTools,
+            incrementalEmbeddingGenerator,
+            embeddingStore);
+        var incrementalGateway = incrementalServiceProvider.GetRequiredService<IMcpGateway>();
+
+        var buildResult = await incrementalGateway.BuildIndexAsync();
+
+        await Assert.That(buildResult.VectorizedToolCount).IsEqualTo(2);
+        await Assert.That(incrementalEmbeddingGenerator.Calls.Count).IsEqualTo(1);
+        await Assert.That(incrementalEmbeddingGenerator.Calls[0].Count).IsEqualTo(1);
+        await Assert.That(incrementalEmbeddingGenerator.Calls[0].Single().Contains("weather_search_forecast", StringComparison.Ordinal)).IsTrue();
+        await Assert.That(embeddingStore.UpsertCalls.Count).IsEqualTo(2);
+        await Assert.That(embeddingStore.UpsertCalls[1].Count).IsEqualTo(1);
+        await Assert.That(embeddingStore.UpsertCalls[1].Single().ToolId).IsEqualTo("local:weather_search_forecast");
+    }
+
+    [TUnit.Core.Test]
     public async Task SearchAsync_PrefersKeyedEmbeddingGeneratorOverUnkeyedRegistration()
     {
         var keyedEmbeddingGenerator = new TestEmbeddingGenerator();

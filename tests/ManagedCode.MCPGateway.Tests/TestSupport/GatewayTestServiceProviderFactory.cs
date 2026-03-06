@@ -1,6 +1,7 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using ManagedCode.MCPGateway.Abstractions;
 
 namespace ManagedCode.MCPGateway.Tests;
 
@@ -8,7 +9,8 @@ internal static class GatewayTestServiceProviderFactory
 {
     public static ServiceProvider Create(
         Action<McpGatewayOptions> configure,
-        IEmbeddingGenerator<string, Embedding<float>>? embeddingGenerator = null)
+        IEmbeddingGenerator<string, Embedding<float>>? embeddingGenerator = null,
+        IMcpGatewayToolEmbeddingStore? embeddingStore = null)
     {
         var services = new ServiceCollection();
         services.AddLogging(static logging => logging.SetMinimumLevel(LogLevel.Debug));
@@ -16,6 +18,11 @@ internal static class GatewayTestServiceProviderFactory
         if (embeddingGenerator is not null)
         {
             services.AddSingleton(embeddingGenerator);
+        }
+
+        if (embeddingStore is not null)
+        {
+            services.AddSingleton(embeddingStore);
         }
 
         services.AddManagedCodeMcpGateway(configure);

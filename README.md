@@ -25,6 +25,7 @@ dotnet add package ManagedCode.MCPGateway
 - one registry for local tools, stdio MCP servers, HTTP MCP servers, or prebuilt `McpClient` instances
 - descriptor indexing that enriches search with tool name, description, required arguments, and input schema
 - vector search when an `IEmbeddingGenerator<string, Embedding<float>>` is registered
+- optional persisted tool embeddings through `IMcpGatewayToolEmbeddingStore`
 - lexical fallback when embeddings are unavailable
 - one invoke surface for both local `AIFunction` tools and MCP tools
 - optional meta-tools you can hand back to another model as normal `AITool` instances
@@ -181,6 +182,63 @@ services.AddManagedCodeMcpGateway(options =>
 ```
 
 The keyed registration is the preferred one, so you can dedicate a specific embedder to the gateway without affecting other app services.
+
+## Persistent Tool Embeddings
+
+For process-local caching, the package already includes `McpGatewayInMemoryToolEmbeddingStore`:
+
+```csharp
+var services = new ServiceCollection();
+
+services.AddKeyedSingleton<IEmbeddingGenerator<string, Embedding<float>>, MyEmbeddingGenerator>(
+    McpGatewayServiceKeys.EmbeddingGenerator);
+services.AddSingleton<IMcpGatewayToolEmbeddingStore, McpGatewayInMemoryToolEmbeddingStore>();
+
+services.AddManagedCodeMcpGateway(options =>
+{
+    options.AddTool(
+        "local",
+        AIFunctionFactory.Create(
+            static (string query) => $"github:{query}",
+            new AIFunctionFactoryOptions
+            {
+                Name = "github_search_repositories",
+                Description = "Search GitHub repositories by user query."
+            }));
+});
+```
+
+If you want to keep descriptor embeddings in a database or another persistent store, register your own `IMcpGatewayToolEmbeddingStore` implementation instead:
+
+```csharp
+var services = new ServiceCollection();
+
+services.AddKeyedSingleton<IEmbeddingGenerator<string, Embedding<float>>, MyEmbeddingGenerator>(
+    McpGatewayServiceKeys.EmbeddingGenerator);
+services.AddSingleton<IMcpGatewayToolEmbeddingStore, MyToolEmbeddingStore>();
+
+services.AddManagedCodeMcpGateway(options =>
+{
+    options.AddTool(
+        "local",
+        AIFunctionFactory.Create(
+            static (string query) => $"github:{query}",
+            new AIFunctionFactoryOptions
+            {
+                Name = "github_search_repositories",
+                Description = "Search GitHub repositories by user query."
+            }));
+});
+```
+
+During `BuildIndexAsync()` the gateway:
+
+- computes a descriptor-document hash per tool
+- asks `IMcpGatewayToolEmbeddingStore` for matching stored vectors
+- generates embeddings only for tools that are missing in the store
+- upserts the newly generated vectors back into the store
+
+This avoids recalculating tool embeddings on every rebuild while still refreshing them automatically when the descriptor document changes. Query embeddings are still generated at search time from the registered `IEmbeddingGenerator<string, Embedding<float>>`.
 
 ## Supported Sources
 

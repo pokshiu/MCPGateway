@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Globalization;
+using System.Security.Cryptography;
 using ManagedCode.MCPGateway.Abstractions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
@@ -34,6 +35,8 @@ public sealed class McpGateway(
     private const string EmbeddingCountMismatchDiagnosticCode = "embedding_count_mismatch";
     private const string EmbeddingGeneratorMissingDiagnosticCode = "embedding_generator_missing";
     private const string EmbeddingFailedDiagnosticCode = "embedding_failed";
+    private const string EmbeddingStoreLoadFailedDiagnosticCode = "embedding_store_load_failed";
+    private const string EmbeddingStoreSaveFailedDiagnosticCode = "embedding_store_save_failed";
     private const string QueryVectorEmptyDiagnosticCode = "query_vector_empty";
     private const string LexicalFallbackDiagnosticCode = "lexical_fallback";
     private const string VectorSearchFailedDiagnosticCode = "vector_search_failed";
@@ -43,6 +46,8 @@ public sealed class McpGateway(
     private const string EmbeddingCountMismatchMessageTemplate = "Embedding generation returned {0} vectors for {1} tools.";
     private const string EmbeddingGeneratorMissingMessage = "No keyed or unkeyed IEmbeddingGenerator<string, Embedding<float>> is registered. Lexical fallback only.";
     private const string EmbeddingFailedMessageTemplate = "Embedding generation failed: {0}";
+    private const string EmbeddingStoreLoadFailedMessageTemplate = "Loading stored tool embeddings failed: {0}";
+    private const string EmbeddingStoreSaveFailedMessageTemplate = "Persisting generated tool embeddings failed: {0}";
     private const string QueryVectorEmptyMessage = "Embedding generator returned an empty query vector.";
     private const string LexicalFallbackMessage = "Vector search is unavailable. Lexical ranking was used.";
     private const string VectorSearchFailedMessageTemplate = "Vector ranking failed and lexical fallback was used: {0}";
@@ -55,6 +60,8 @@ public sealed class McpGateway(
     private const string GatewayIndexRebuiltLogMessage = "Gateway index rebuilt. Tools={ToolCount} VectorizedTools={VectorizedToolCount}.";
     private const string GatewayVectorSearchFailedLogMessage = "Gateway vector search failed. Falling back to lexical ranking.";
     private const string GatewayInvocationFailedLogMessage = "Gateway invocation failed for {ToolId}.";
+    private const string EmbeddingStoreLoadFailedLogMessage = "Loading stored tool embeddings failed. Falling back to generator-backed indexing.";
+    private const string EmbeddingStoreSaveFailedLogMessage = "Persisting generated tool embeddings failed.";
     private const string InputSchemaPropertiesPropertyName = "properties";
     private const string InputSchemaRequiredPropertyName = "required";
     private const string InputSchemaDescriptionPropertyName = "description";
@@ -103,6 +110,8 @@ public sealed class McpGateway(
     private static readonly CompositeFormat DuplicateToolIdMessageFormat = CompositeFormat.Parse(DuplicateToolIdMessageTemplate);
     private static readonly CompositeFormat EmbeddingCountMismatchMessageFormat = CompositeFormat.Parse(EmbeddingCountMismatchMessageTemplate);
     private static readonly CompositeFormat EmbeddingFailedMessageFormat = CompositeFormat.Parse(EmbeddingFailedMessageTemplate);
+    private static readonly CompositeFormat EmbeddingStoreLoadFailedMessageFormat = CompositeFormat.Parse(EmbeddingStoreLoadFailedMessageTemplate);
+    private static readonly CompositeFormat EmbeddingStoreSaveFailedMessageFormat = CompositeFormat.Parse(EmbeddingStoreSaveFailedMessageTemplate);
     private static readonly CompositeFormat VectorSearchFailedMessageFormat = CompositeFormat.Parse(VectorSearchFailedMessageTemplate);
     private static readonly CompositeFormat ToolNotInvokableMessageFormat = CompositeFormat.Parse(ToolNotInvokableMessageTemplate);
     private static readonly CompositeFormat ToolIdNotFoundMessageFormat = CompositeFormat.Parse(ToolIdNotFoundMessageTemplate);
@@ -278,61 +287,118 @@ public sealed class McpGateway(
             var vectorizedToolCount = 0;
             if (entries.Count > 0)
             {
-                try
+                await using var embeddingGeneratorLease = ResolveEmbeddingGenerator();
+                await using var embeddingStoreLease = ResolveToolEmbeddingStore();
+                var embeddingGenerator = embeddingGeneratorLease.Generator;
+                var embeddingStore = embeddingStoreLease.Store;
+                var storeCandidates = entries
+                    .Select((entry, index) => new ToolEmbeddingCandidate(
+                        index,
+                        new McpGatewayToolEmbeddingLookup(entry.Descriptor.ToolId, ComputeDocumentHash(entry.Document)),
+                        entry.Descriptor.SourceId,
+                        entry.Descriptor.ToolName))
+                    .ToList();
+
+                if (embeddingStore is not null)
                 {
-                    await using var embeddingGeneratorLease = ResolveEmbeddingGenerator();
-                    if (embeddingGeneratorLease.Generator is IEmbeddingGenerator<string, Embedding<float>> embeddingGenerator)
+                    try
                     {
-                        var embeddings = (await embeddingGenerator.GenerateAsync(
-                                entries.Select(static item => item.Document),
-                                cancellationToken: cancellationToken))
-                            .ToList();
-                        if (embeddings.Count == entries.Count)
+                        var storedEmbeddings = await embeddingStore.GetAsync(
+                            storeCandidates.Select(static candidate => candidate.Lookup).ToList(),
+                            cancellationToken);
+                        var storedEmbeddingsByLookup = storedEmbeddings
+                            .GroupBy(static embedding => new McpGatewayToolEmbeddingLookup(embedding.ToolId, embedding.DocumentHash))
+                            .ToDictionary(static group => group.Key, static group => group.Last());
+
+                        foreach (var candidate in storeCandidates)
                         {
-                            for (var index = 0; index < entries.Count; index++)
+                            if (storedEmbeddingsByLookup.TryGetValue(candidate.Lookup, out var storedEmbedding))
                             {
-                                var vector = embeddings[index].Vector.ToArray();
-                                if (vector.Length == 0)
+                                ApplyEmbedding(entries, candidate.Index, storedEmbedding.Vector, ref vectorizedToolCount);
+                            }
+                        }
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        diagnostics.Add(new McpGatewayDiagnostic(
+                            EmbeddingStoreLoadFailedDiagnosticCode,
+                            string.Format(CultureInfo.InvariantCulture, EmbeddingStoreLoadFailedMessageFormat, ex.GetBaseException().Message)));
+                        _logger.LogWarning(ex, EmbeddingStoreLoadFailedLogMessage);
+                    }
+                }
+
+                var missingCandidates = storeCandidates
+                    .Where(candidate => entries[candidate.Index].Magnitude <= double.Epsilon)
+                    .ToList();
+
+                if (missingCandidates.Count > 0)
+                {
+                    try
+                    {
+                        if (embeddingGenerator is not null)
+                        {
+                            var embeddings = (await embeddingGenerator.GenerateAsync(
+                                    missingCandidates.Select(candidate => entries[candidate.Index].Document),
+                                    cancellationToken: cancellationToken))
+                                .ToList();
+                            if (embeddings.Count == missingCandidates.Count)
+                            {
+                                var generatedEmbeddings = new List<McpGatewayToolEmbedding>(missingCandidates.Count);
+                                for (var index = 0; index < missingCandidates.Count; index++)
                                 {
-                                    continue;
+                                    var candidate = missingCandidates[index];
+                                    var vector = embeddings[index].Vector.ToArray();
+                                    if (ApplyEmbedding(entries, candidate.Index, vector, ref vectorizedToolCount))
+                                    {
+                                        generatedEmbeddings.Add(new McpGatewayToolEmbedding(
+                                            candidate.Lookup.ToolId,
+                                            candidate.SourceId,
+                                            candidate.ToolName,
+                                            candidate.Lookup.DocumentHash,
+                                            vector));
+                                    }
                                 }
 
-                                entries[index] = entries[index] with
+                                if (generatedEmbeddings.Count > 0 && embeddingStore is not null)
                                 {
-                                    Vector = vector,
-                                    Magnitude = CalculateMagnitude(vector)
-                                };
-
-                                if (entries[index].Magnitude > double.Epsilon)
-                                {
-                                    vectorizedToolCount++;
+                                    try
+                                    {
+                                        await embeddingStore.UpsertAsync(generatedEmbeddings, cancellationToken);
+                                    }
+                                    catch (Exception ex) when (ex is not OperationCanceledException)
+                                    {
+                                        diagnostics.Add(new McpGatewayDiagnostic(
+                                            EmbeddingStoreSaveFailedDiagnosticCode,
+                                            string.Format(CultureInfo.InvariantCulture, EmbeddingStoreSaveFailedMessageFormat, ex.GetBaseException().Message)));
+                                        _logger.LogWarning(ex, EmbeddingStoreSaveFailedLogMessage);
+                                    }
                                 }
+                            }
+                            else
+                            {
+                                diagnostics.Add(new McpGatewayDiagnostic(
+                                    EmbeddingCountMismatchDiagnosticCode,
+                                    string.Format(
+                                        CultureInfo.InvariantCulture,
+                                        EmbeddingCountMismatchMessageFormat,
+                                        embeddings.Count,
+                                        missingCandidates.Count)));
                             }
                         }
                         else
                         {
                             diagnostics.Add(new McpGatewayDiagnostic(
-                                EmbeddingCountMismatchDiagnosticCode,
-                                string.Format(
-                                    CultureInfo.InvariantCulture,
-                                    EmbeddingCountMismatchMessageFormat,
-                                    embeddings.Count,
-                                    entries.Count)));
+                                EmbeddingGeneratorMissingDiagnosticCode,
+                                EmbeddingGeneratorMissingMessage));
                         }
                     }
-                    else
+                    catch (Exception ex) when (ex is not OperationCanceledException)
                     {
                         diagnostics.Add(new McpGatewayDiagnostic(
-                            EmbeddingGeneratorMissingDiagnosticCode,
-                            EmbeddingGeneratorMissingMessage));
+                            EmbeddingFailedDiagnosticCode,
+                            string.Format(CultureInfo.InvariantCulture, EmbeddingFailedMessageFormat, ex.GetBaseException().Message)));
+                        _logger.LogWarning(ex, EmbeddingGenerationFailedLogMessage);
                     }
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    diagnostics.Add(new McpGatewayDiagnostic(
-                        EmbeddingFailedDiagnosticCode,
-                        string.Format(CultureInfo.InvariantCulture, EmbeddingFailedMessageFormat, ex.GetBaseException().Message)));
-                    _logger.LogWarning(ex, EmbeddingGenerationFailedLogMessage);
                 }
             }
 
@@ -489,6 +555,18 @@ public sealed class McpGateway(
     private static IEmbeddingGenerator<string, Embedding<float>>? ResolveEmbeddingGenerator(IServiceProvider serviceProvider)
         => serviceProvider.GetKeyedService<IEmbeddingGenerator<string, Embedding<float>>>(McpGatewayServiceKeys.EmbeddingGenerator)
             ?? serviceProvider.GetService<IEmbeddingGenerator<string, Embedding<float>>>();
+
+    private ToolEmbeddingStoreLease ResolveToolEmbeddingStore()
+    {
+        if (_serviceProvider.GetService(typeof(IServiceScopeFactory)) is not IServiceScopeFactory scopeFactory)
+        {
+            return new ToolEmbeddingStoreLease(_serviceProvider.GetService<IMcpGatewayToolEmbeddingStore>());
+        }
+
+        var scope = scopeFactory.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetService<IMcpGatewayToolEmbeddingStore>();
+        return new ToolEmbeddingStoreLease(store, scope);
+    }
 
     public async Task<McpGatewayInvokeResult> InvokeAsync(
         McpGatewayInvokeRequest request,
@@ -892,6 +970,37 @@ public sealed class McpGateway(
 
         return Math.Sqrt(magnitudeSquared);
     }
+
+    private static bool ApplyEmbedding(
+        IList<ToolCatalogEntry> entries,
+        int index,
+        IReadOnlyList<float> vector,
+        ref int vectorizedToolCount)
+    {
+        if (vector.Count == 0)
+        {
+            return false;
+        }
+
+        var normalizedVector = vector.ToArray();
+        var magnitude = CalculateMagnitude(normalizedVector);
+        entries[index] = entries[index] with
+        {
+            Vector = normalizedVector,
+            Magnitude = magnitude
+        };
+
+        if (magnitude <= double.Epsilon)
+        {
+            return false;
+        }
+
+        vectorizedToolCount++;
+        return true;
+    }
+
+    private static string ComputeDocumentHash(string value)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
     private static string BuildEffectiveSearchQuery(McpGatewaySearchRequest request)
     {
@@ -1338,6 +1447,12 @@ public sealed class McpGateway(
         public static InvocationResolution Fail(string error) => new(false, null, error);
     }
 
+    private sealed record ToolEmbeddingCandidate(
+        int Index,
+        McpGatewayToolEmbeddingLookup Lookup,
+        string SourceId,
+        string ToolName);
+
     private sealed record ScoredToolEntry(ToolCatalogEntry Entry, double Score);
 
     private sealed record ToolCatalogEntry(
@@ -1358,6 +1473,16 @@ public sealed class McpGateway(
         : IAsyncDisposable
     {
         public IEmbeddingGenerator<string, Embedding<float>>? Generator { get; } = generator;
+
+        public ValueTask DisposeAsync() => scope?.DisposeAsync() ?? ValueTask.CompletedTask;
+    }
+
+    private sealed class ToolEmbeddingStoreLease(
+        IMcpGatewayToolEmbeddingStore? store,
+        AsyncServiceScope? scope = null)
+        : IAsyncDisposable
+    {
+        public IMcpGatewayToolEmbeddingStore? Store { get; } = store;
 
         public ValueTask DisposeAsync() => scope?.DisposeAsync() ?? ValueTask.CompletedTask;
     }
