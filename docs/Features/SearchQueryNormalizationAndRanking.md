@@ -107,6 +107,12 @@ Test mapping:
 - docs explain how to register the optional query-normalization client
 - build, analyzers, and tests stay green
 
+## Related Docs
+
+- [`README.md`](../../README.md)
+- [`docs/ADR/ADR-0001-gateway-runtime-and-search-fallback.md`](../ADR/ADR-0001-gateway-runtime-and-search-fallback.md)
+- [`docs/Architecture/Overview.md`](../Architecture/Overview.md)
+
 ## Implementation Plan (step-by-step)
 
 1. Add search-normalization configuration to `McpGatewayOptions` and a keyed DI service key for the optional normalizer chat client.

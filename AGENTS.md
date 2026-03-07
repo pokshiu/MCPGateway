@@ -126,6 +126,7 @@ If no new rule is detected -> do not update the file.
 ### Documentation (ALL TASKS)
 
 - Update `README.md` whenever public API shape, setup, or usage changes.
+- For non-trivial architecture, runtime-flow, or cross-cutting search changes, always add or update an ADR under `docs/ADR/`, update `docs/Architecture/Overview.md`, and keep `README.md` synchronized with the shipped behavior and examples so the docs describe the real package rather than an older design snapshot.
 - When the package requires an initialization step such as index building, provide an ergonomic optional integration path (for example DI extension or hosted background warmup) instead of forcing every consumer to call it manually, and document when manual initialization is still appropriate.
 - Keep documented configuration defaults synchronized with the actual `McpGatewayOptions` defaults; for example, `MaxSearchResults` default is `15`, not stale sample values.
 - Keep the README focused on package usage and onboarding, not internal implementation notes.

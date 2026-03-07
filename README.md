@@ -20,9 +20,17 @@ The package is built on:
 dotnet add package ManagedCode.MCPGateway
 ```
 
+## Architecture And Decision Records
+
+- [Architecture overview](docs/Architecture/Overview.md)
+- [ADR-0001: Runtime boundaries and index lifecycle](docs/ADR/ADR-0001-runtime-boundaries-and-index-lifecycle.md)
+- [ADR-0002: Search ranking and query normalization](docs/ADR/ADR-0002-search-ranking-and-query-normalization.md)
+- [Feature spec: Search query normalization and ranking](docs/Features/SearchQueryNormalizationAndRanking.md)
+
 ## What You Get
 
 - one registry for local tools, stdio MCP servers, HTTP MCP servers, or prebuilt `McpClient` instances
+- a DI-native split between `IMcpGateway` for runtime search/invoke and `IMcpGatewayRegistry` for catalog mutation
 - descriptor indexing that enriches search with tool name, description, required arguments, and input schema
 - lazy index build on the first catalog/search/invoke operation, plus optional eager warmup hooks for startup scenarios
 - configurable search strategy with embeddings or tokenizer-backed heuristic ranking
@@ -97,6 +105,8 @@ registry.AddTool(
 var tools = await gateway.ListToolsAsync();
 ```
 
+`AddManagedCodeMcpGateway(...)` registers `IMcpGateway`, `IMcpGatewayRegistry`, and `McpGatewayToolSet`. Add `AddManagedCodeMcpGatewayIndexWarmup()` only when you want hosted eager initialization.
+
 ## Optional Eager Warmup
 
 If you want to warm the catalog immediately after building the container, use the service-provider extension:
@@ -104,8 +114,10 @@ If you want to warm the catalog immediately after building the container, use th
 ```csharp
 await using var serviceProvider = services.BuildServiceProvider();
 
-await serviceProvider.InitializeManagedCodeMcpGatewayAsync();
+var build = await serviceProvider.InitializeManagedCodeMcpGatewayAsync();
 ```
+
+`InitializeManagedCodeMcpGatewayAsync()` returns `McpGatewayIndexBuildResult`, so startup code can inspect diagnostics or fail fast explicitly.
 
 For hosted applications, register background warmup once and let the host trigger it on startup:
 
@@ -129,6 +141,76 @@ services.AddManagedCodeMcpGatewayIndexWarmup();
 ```
 
 Use eager warmup when you want fail-fast startup behavior, a warmed cache before the first request, or deterministic startup benchmarking. Otherwise the lazy default is enough.
+
+## Recommended Hosted Setup
+
+This example shows the full production-oriented integration shape in one place. Remove the optional registrations if your host does not need vector search, query normalization, or persistent embedding reuse.
+
+```csharp
+using ManagedCode.MCPGateway;
+using ManagedCode.MCPGateway.Abstractions;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
+
+var services = new ServiceCollection();
+
+services.AddKeyedSingleton<IEmbeddingGenerator<string, Embedding<float>>, MyEmbeddingGenerator>(
+    McpGatewayServiceKeys.EmbeddingGenerator);
+services.AddKeyedSingleton<IChatClient, MySearchRewriteChatClient>(
+    McpGatewayServiceKeys.SearchQueryChatClient);
+services.AddSingleton<IMcpGatewayToolEmbeddingStore, McpGatewayInMemoryToolEmbeddingStore>();
+
+services.AddManagedCodeMcpGateway(options =>
+{
+    options.SearchStrategy = McpGatewaySearchStrategy.Auto;
+    options.SearchQueryNormalization = McpGatewaySearchQueryNormalization.TranslateToEnglishWhenAvailable;
+
+    options.AddTool(
+        "local",
+        AIFunctionFactory.Create(
+            static (string query) => $"github:{query}",
+            new AIFunctionFactoryOptions
+            {
+                Name = "github_search_repositories",
+                Description = "Search GitHub repositories by user query."
+            }));
+
+    options.AddHttpServer(
+        sourceId: "docs",
+        endpoint: new Uri("https://example.com/mcp"));
+});
+
+services.AddManagedCodeMcpGatewayIndexWarmup();
+
+await using var serviceProvider = services.BuildServiceProvider();
+
+var gateway = serviceProvider.GetRequiredService<IMcpGateway>();
+var registry = serviceProvider.GetRequiredService<IMcpGatewayRegistry>();
+var metaTools = serviceProvider.GetRequiredService<McpGatewayToolSet>().CreateTools();
+
+registry.AddTool(
+    "runtime",
+    AIFunctionFactory.Create(
+        static (string query) => $"status:{query}",
+        new AIFunctionFactoryOptions
+        {
+            Name = "project_status_lookup",
+            Description = "Look up project status by identifier or short title."
+        }));
+
+var search = await gateway.SearchAsync(
+    new McpGatewaySearchRequest(
+        Query: "review qeue for managedcode prs",
+        ContextSummary: "User is looking at repository maintenance work"));
+```
+
+Notes:
+
+- `SearchStrategy.Auto` is the default and is usually the right production setting.
+- the embedding generator, search-query rewrite client, and embedding store are all optional DI integrations
+- hosted warmup is optional; if you omit it, the gateway builds its catalog lazily on first use
+- runtime registrations through `IMcpGatewayRegistry` invalidate the catalog automatically, so the next list/search/invoke call rebuilds the index
+- `McpGatewayToolSet` and `gateway.CreateMetaTools()` expose the same meta-tools in two integration styles
 
 ## Context-Aware Search And Invoke
 
@@ -170,6 +252,21 @@ You can expose the gateway itself as two reusable `AITool` instances:
 var tools = gateway.CreateMetaTools();
 ```
 
+Or resolve the reusable helper from DI:
+
+```csharp
+var toolSet = serviceProvider.GetRequiredService<McpGatewayToolSet>();
+var tools = toolSet.CreateTools();
+```
+
+Custom stable tool names are supported:
+
+```csharp
+var tools = gateway.CreateMetaTools(
+    searchToolName: "workspace_tool_search",
+    invokeToolName: "workspace_tool_invoke");
+```
+
 By default this creates:
 
 - `gateway_tools_search`
@@ -207,9 +304,32 @@ The tokenizer-backed mode builds field-aware search documents from tool names, d
 
 This keeps the search mathematical and tokenizer-driven instead of relying on hand-written query phrase exceptions. The tokenizer-backed path uses the built-in `ChatGptO200kBase` profile for the GPT-4o / ChatGPT tokenizer family.
 
+There is no public tokenizer-selection option. The package ships one built-in tokenizer-backed path and keeps the behavior configurable through search strategy, optional embeddings, and optional English query normalization.
+
 If an embedding generator is registered and vector search is active, the gateway vectorizes descriptor documents and uses cosine similarity plus lexical boosts. It first tries the keyed registration `McpGatewayServiceKeys.EmbeddingGenerator` and then falls back to any regular `IEmbeddingGenerator<string, Embedding<float>>`.
 
 The embedding generator is resolved per gateway operation, so singleton, scoped, and transient DI registrations all work with index builds and search.
+
+### Reading Search Diagnostics
+
+`McpGatewaySearchResult` exposes both the ranking mode and diagnostics for the chosen path:
+
+```csharp
+var result = await gateway.SearchAsync("review qeue for managedcode prs");
+
+Console.WriteLine(result.RankingMode);
+
+foreach (var diagnostic in result.Diagnostics)
+{
+    Console.WriteLine($"{diagnostic.Code}: {diagnostic.Message}");
+}
+```
+
+Common diagnostics:
+
+- `query_normalized`
+- `lexical_fallback`
+- `vector_search_failed`
 
 ## Optional English Query Normalization
 
@@ -285,7 +405,7 @@ Use `McpGatewaySearchStrategy.Tokenizer` when:
 
 - you want a zero-embedding deployment
 - you want deterministic local search behavior without an embedding provider
-- you want to compare tokenizer profiles explicitly in tests or benchmarks
+- you want to benchmark tokenizer-backed ranking independently from vector search
 
 ## Search Strategy Configuration
 
@@ -439,7 +559,7 @@ var result = await gateway.SearchAsync("review qeue for managedcode prs");
 With no embedding generator registered:
 
 - the gateway still builds the catalog
-- search uses the configured tokenizer profile and two-stage lexical ranking
+- search uses the built-in `ChatGptO200kBase` tokenizer path and two-stage lexical ranking
 - an optional keyed search rewrite `IChatClient` can normalize the query to English first
 - typo-tolerant term heuristics still participate in ranking
 - the result diagnostics contain `lexical_fallback`

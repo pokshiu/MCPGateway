@@ -7,7 +7,7 @@ This document is the module map for `ManagedCode.MCPGateway`.
 In scope:
 
 - package boundaries
-- runtime collaboration between gateway facade, registry, runtime orchestration, and search/indexing helpers
+- runtime collaboration between gateway facade, registry, optional warmup paths, runtime orchestration, and search/indexing helpers
 - dependency direction between public APIs and internal modules
 
 Out of scope:
@@ -18,7 +18,7 @@ Out of scope:
 
 ## Summary
 
-`ManagedCode.MCPGateway` is a package-first library with one public execution surface, one separate catalog-mutation surface, and one internal runtime orchestrator. The key structural rule is that public contracts stay small and explicit, while internal catalog, runtime, and helper infrastructure live under `Internal/` with one-way dependencies toward public abstractions, configuration, and models.
+`ManagedCode.MCPGateway` is a package-first library with one public execution surface, one separate catalog-mutation surface, and one internal runtime orchestrator. The key structural rule is that public contracts stay small and explicit, while internal catalog, runtime, warmup, and helper infrastructure live under `Internal/` with one-way dependencies toward public abstractions, configuration, and models.
 
 ## System And Module Map
 
@@ -28,7 +28,9 @@ flowchart LR
     ToolSet["McpGatewayToolSet"] --> Facade
     DI["DI registration"] --> Facade
     DI --> Registry["Catalog registry"]
+    DI --> Warmup["Optional warmup service"]
     Runtime --> InternalCatalog["Internal catalog snapshots and sources"]
+    Runtime --> Search["Search normalization and ranking"]
     Runtime --> Models["Public models"]
     Runtime --> Config["Public configuration"]
     Runtime --> Abstractions["Public abstractions"]
@@ -46,6 +48,7 @@ flowchart LR
     IMcpGateway["IMcpGateway"] --> McpGateway["McpGateway"]
     IMcpGatewayRegistry["IMcpGatewayRegistry"] --> Registry["McpGatewayRegistry"]
     Facade["McpGateway"] --> Runtime["McpGatewayRuntime"]
+    Warmup["InitializeManagedCodeMcpGatewayAsync / McpGatewayIndexWarmupService"] --> Runtime
     Runtime --> SearchRequest["McpGatewaySearchRequest"]
     Runtime --> InvokeRequest["McpGatewayInvokeRequest"]
     Runtime --> Descriptor["McpGatewayToolDescriptor"]
@@ -66,6 +69,7 @@ flowchart LR
     McpGatewayRuntime --> RuntimeEmbeddings["Internal/Runtime/Embeddings/*"]
     Registry["McpGatewayRegistry"] --> RegistrationCollection["McpGatewayRegistrationCollection"]
     RegistrationCollection --> SourceRegistrations["McpGatewayToolSourceRegistration*"]
+    Warmup["McpGatewayIndexWarmupService"] --> McpGateway["IMcpGateway"]
     InMemoryStore["McpGatewayInMemoryToolEmbeddingStore"] --> StoreIndex["McpGatewayToolEmbeddingStoreIndex"]
 ```
 
@@ -80,6 +84,7 @@ flowchart LR
 - Internal catalog sources: [`src/ManagedCode.MCPGateway/Internal/Catalog/Sources/`](../../src/ManagedCode.MCPGateway/Internal/Catalog/Sources/) owns transport-specific source registrations and MCP client creation.
 - Internal runtime module: [`src/ManagedCode.MCPGateway/Internal/Runtime/`](../../src/ManagedCode.MCPGateway/Internal/Runtime/) owns orchestration and is split by core, catalog, search, invocation, and embeddings concerns.
 - Internal embedding helpers: [`src/ManagedCode.MCPGateway/Internal/Embeddings/`](../../src/ManagedCode.MCPGateway/Internal/Embeddings/) contains non-public embedding indexing helpers.
+- Optional warmup: [`src/ManagedCode.MCPGateway/Internal/Warmup/McpGatewayIndexWarmupService.cs`](../../src/ManagedCode.MCPGateway/Internal/Warmup/McpGatewayIndexWarmupService.cs) provides hosted eager index warmup while the service-provider extension offers an explicit eager initialization path.
 - DI registration: [`src/ManagedCode.MCPGateway/Registration/McpGatewayServiceCollectionExtensions.cs`](../../src/ManagedCode.MCPGateway/Registration/McpGatewayServiceCollectionExtensions.cs) wires facade, registry, tool set, and internal catalog source into the container.
 
 ## Dependency Rules
@@ -88,16 +93,18 @@ flowchart LR
 - `McpGateway` is a thin facade only. It may delegate to `McpGatewayRuntime`, but it must not own registry mutation logic.
 - `Internal/Catalog` owns mutable source registration state. `Internal/Runtime` may read snapshots from it, but must not mutate registrations directly.
 - `Internal/Catalog/Sources` owns MCP transport-specific creation and caching. Transport setup must not leak into `Internal/Runtime`, `Models`, or `Configuration`.
+- Warmup helpers may trigger `IMcpGateway.BuildIndexAsync(...)`, but must not implement their own indexing logic or bypass the runtime.
 - `Internal/Runtime` may depend on `Internal/Catalog`, `Internal/Embeddings`, `Embeddings`, `Models`, `Configuration`, and `Abstractions`.
 - `Models` should stay contract-first. Internal transport, registry, or lifecycle helpers do not belong there.
 - Embedding support must stay optional and isolated behind `IMcpGatewayToolEmbeddingStore` and embedding-generator abstractions.
 
 ## Key Decisions (ADRs)
 
-- No ADR files exist yet for this package. When boundaries or dependency rules become more complex, add an ADR under `docs/ADR/` and link it here.
+- [`docs/ADR/ADR-0001-gateway-runtime-and-search-fallback.md`](../ADR/ADR-0001-gateway-runtime-and-search-fallback.md): keeps one thin gateway facade, one separate DI-managed registry, optional eager warmup, and `SearchStrategy.Auto` as the default embeddings-or-tokenizer search mode.
 
 ## Related Docs
 
 - [`README.md`](../../README.md)
+- [`docs/ADR/ADR-0001-gateway-runtime-and-search-fallback.md`](../ADR/ADR-0001-gateway-runtime-and-search-fallback.md)
 - [`docs/Features/SearchQueryNormalizationAndRanking.md`](../Features/SearchQueryNormalizationAndRanking.md)
 - [`AGENTS.md`](../../AGENTS.md)
