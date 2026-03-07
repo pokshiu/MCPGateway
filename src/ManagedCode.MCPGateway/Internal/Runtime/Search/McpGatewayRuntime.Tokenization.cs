@@ -4,11 +4,10 @@ namespace ManagedCode.MCPGateway;
 
 internal sealed partial class McpGatewayRuntime
 {
-    private TokenSearchProfile BuildTokenSearchProfile(
-        IEnumerable<WeightedTextSegment> segments,
-        IReadOnlyDictionary<string, double>? inverseDocumentFrequencies = null)
+    private IReadOnlyList<TokenizedSearchField> BuildTokenizedSearchFields(
+        IEnumerable<WeightedTextSegment> segments)
     {
-        var termWeights = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        var fields = new List<TokenizedSearchField>();
         foreach (var segment in segments)
         {
             if (segment.Weight <= double.Epsilon || string.IsNullOrWhiteSpace(segment.Text))
@@ -16,16 +15,70 @@ internal sealed partial class McpGatewayRuntime
                 continue;
             }
 
-            var tokenTerms = ExtractTokenTerms(segment.Text);
+            var tokenTerms = ExtractTokenTerms(segment.Text).ToList();
+            var lexicalTerms = BuildSearchTerms(segment.Text);
             if (tokenTerms.Count == 0)
             {
-                tokenTerms = BuildSearchTerms(segment.Text).ToList();
+                tokenTerms = lexicalTerms.ToList();
+            }
+            else
+            {
+                foreach (var lexicalTerm in lexicalTerms)
+                {
+                    if (!tokenTerms.Contains(lexicalTerm, StringComparer.OrdinalIgnoreCase))
+                    {
+                        tokenTerms.Add(lexicalTerm);
+                    }
+                }
             }
 
-            foreach (var term in tokenTerms)
+            if (tokenTerms.Count == 0)
             {
-                AddWeightedSearchTerm(termWeights, term, segment.Weight);
-                AddCharacterNGramTerms(termWeights, term, segment.Weight);
+                continue;
+            }
+
+            fields.Add(new TokenizedSearchField(
+                segment.Weight,
+                tokenTerms.Count,
+                BuildTermFrequencies(tokenTerms),
+                BuildCharacterNGramFrequencies(tokenTerms)));
+        }
+
+        return fields;
+    }
+
+    private static TokenSearchProfile BuildTokenSearchProfile(
+        IEnumerable<TokenizedSearchField> fields,
+        IReadOnlyDictionary<string, double>? inverseDocumentFrequencies = null)
+    {
+        var termWeights = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        foreach (var field in fields)
+        {
+            foreach (var (term, weight) in field.TermWeights)
+            {
+                AddWeightedSearchTerm(termWeights, term, weight * field.Weight);
+            }
+        }
+
+        var rawProfile = CreateTokenSearchProfile(termWeights);
+        return inverseDocumentFrequencies is { Count: > 0 }
+            ? ApplyTokenInverseDocumentFrequencies(rawProfile, inverseDocumentFrequencies)
+            : rawProfile;
+    }
+
+    private static TokenSearchProfile BuildCharacterNGramProfile(
+        IEnumerable<TokenizedSearchField> fields,
+        IReadOnlyDictionary<string, double>? inverseDocumentFrequencies = null)
+    {
+        var termWeights = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        foreach (var field in fields)
+        {
+            foreach (var (term, weight) in field.CharacterNGramWeights)
+            {
+                AddWeightedSearchTerm(
+                    termWeights,
+                    term,
+                    weight * field.Weight * CharacterNGramTokenWeightFactor);
             }
         }
 
@@ -220,6 +273,33 @@ internal sealed partial class McpGatewayRuntime
         return terms;
     }
 
+    private static IReadOnlyDictionary<string, double> BuildTermFrequencies(
+        IEnumerable<string> terms)
+    {
+        var termWeights = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        foreach (var term in terms)
+        {
+            AddWeightedSearchTerm(termWeights, term, 1d);
+        }
+
+        return termWeights;
+    }
+
+    private static IReadOnlyDictionary<string, double> BuildCharacterNGramFrequencies(
+        IEnumerable<string> terms)
+    {
+        var termWeights = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        foreach (var term in terms)
+        {
+            foreach (var ngram in BuildCharacterNGramTerms(term))
+            {
+                AddWeightedSearchTerm(termWeights, ngram, 1d);
+            }
+        }
+
+        return termWeights;
+    }
+
     private static void AddWeightedSearchTerm(
         Dictionary<string, double> termWeights,
         string? term,
@@ -233,24 +313,6 @@ internal sealed partial class McpGatewayRuntime
         termWeights[term] = termWeights.TryGetValue(term, out var existingWeight)
             ? existingWeight + weight
             : weight;
-    }
-
-    private static void AddCharacterNGramTerms(
-        Dictionary<string, double> termWeights,
-        string term,
-        double weight)
-    {
-        var ngrams = BuildCharacterNGramTerms(term);
-        if (ngrams.Count == 0)
-        {
-            return;
-        }
-
-        var ngramWeight = (weight * CharacterNGramTokenWeightFactor) / ngrams.Count;
-        foreach (var ngram in ngrams)
-        {
-            AddWeightedSearchTerm(termWeights, ngram, ngramWeight);
-        }
     }
 
     private static IReadOnlyList<string> BuildCharacterNGramTerms(string term)

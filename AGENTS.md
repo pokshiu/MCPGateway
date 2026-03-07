@@ -94,6 +94,7 @@ If no new rule is detected -> do not update the file.
 - Keep the gateway reusable as a NuGet library, not as an app-specific host.
 - Preserve one public execution surface for local `AITool` instances and MCP tools.
 - Preserve one searchable catalog that supports vector ranking when embeddings are available and lexical fallback when they are not.
+- For multilingual or noisy search inputs, prefer a generic English-normalization step before ranking when an AI/query-rewrite component is available, because the user wants the searchable representation to converge to English instead of relying only on language-specific token overlap.
 - Keep meta-tools available through `McpGatewayToolSet` and `IMcpGateway.CreateMetaTools(...)`.
 - If a user adds or corrects a persistent workflow rule, update `AGENTS.md` first and only then continue with the task.
 
@@ -172,6 +173,7 @@ If no new rule is detected -> do not update the file.
 - Keep the package dependency surface small and justified.
 - Prefer direct generic DI registrations such as `services.TryAddSingleton<IService, Implementation>()` over lambda alias registrations when wiring package services, because the lambda style has already been called out as unreadable and error-prone in this repository.
 - When emitting package identity to external protocols such as MCP client info, never hardcode a fake version string; use the actual assembly/build version so runtime metadata stays aligned with the package being shipped.
+- For search-quality improvements, prefer mathematical or statistical ranking changes over hardcoded phrase lists or ad-hoc query text hacks, because the user explicitly wants tokenizer search to improve through general scoring behavior rather than manual exceptions.
 
 ### Critical (NEVER violate)
 

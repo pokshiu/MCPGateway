@@ -61,6 +61,60 @@ public sealed class McpGatewayTokenizerSearchTests
         }
     }
 
+    [TUnit.Core.Test]
+    public async Task SearchAsync_PrefersFilesystemLookupOverFinanceStatusForInvoicePdfQueries()
+    {
+        await using var serviceProvider = GatewayTestServiceProviderFactory.Create(options =>
+        {
+            TokenizerSearchTestSupport.UseTokenizerSearch(options, McpGatewayTokenSearchTokenizer.ChatGptO200kBase);
+            options.AddTool(
+                "local",
+                TestFunctionFactory.CreateFunction(
+                    SearchWeatherForecast,
+                    "filesystem_find_files",
+                    "Find or locate files, PDFs, report documents, and exported invoice files by folder, reports workspace, glob pattern, extension, or text content. Not for invoice payment status."));
+            options.AddTool(
+                "local",
+                TestFunctionFactory.CreateFunction(
+                    FilterAdvisories,
+                    "finance_invoice_search",
+                    "Find invoices, bills, and billing records by customer, invoice number, payment state, or due date."));
+        });
+        var gateway = serviceProvider.GetRequiredService<IMcpGateway>();
+
+        await gateway.BuildIndexAsync();
+        var searchResult = await gateway.SearchAsync("where did the invoice pdf go in reports", maxResults: 1);
+
+        await Assert.That(searchResult.Matches[0].ToolId).IsEqualTo("local:filesystem_find_files");
+    }
+
+    [TUnit.Core.Test]
+    public async Task SearchAsync_PrefersInventoryLookupOverCatalogSearchForWarehouseAvailability()
+    {
+        await using var serviceProvider = GatewayTestServiceProviderFactory.Create(options =>
+        {
+            TokenizerSearchTestSupport.UseTokenizerSearch(options, McpGatewayTokenSearchTokenizer.ChatGptO200kBase);
+            options.AddTool(
+                "local",
+                TestFunctionFactory.CreateFunction(
+                    SearchWeatherForecast,
+                    "commerce_catalog_search",
+                    "Search product catalog by keyword, category, brand, or attribute filters."));
+            options.AddTool(
+                "local",
+                TestFunctionFactory.CreateFunction(
+                    SearchWeatherForecast,
+                    "commerce_inventory_lookup",
+                    "Lookup inventory, stock by SKU, warehouse balance, and availability."));
+        });
+        var gateway = serviceProvider.GetRequiredService<IMcpGateway>();
+
+        await gateway.BuildIndexAsync();
+        var searchResult = await gateway.SearchAsync("is sku keyboard-ergo available in warehouse", maxResults: 1);
+
+        await Assert.That(searchResult.Matches[0].ToolId).IsEqualTo("local:commerce_inventory_lookup");
+    }
+
     private static void ConfigureTokenizerSearchTools(McpGatewayOptions options)
     {
         TokenizerSearchTestSupport.UseTokenizerSearch(options, McpGatewayTokenSearchTokenizer.ChatGptO200kBase);

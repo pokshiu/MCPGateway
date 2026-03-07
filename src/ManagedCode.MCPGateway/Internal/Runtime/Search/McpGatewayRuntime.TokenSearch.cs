@@ -3,73 +3,201 @@ namespace ManagedCode.MCPGateway;
 internal sealed partial class McpGatewayRuntime
 {
     private static double ApplySearchBoosts(ToolCatalogEntry entry, string query, double score)
-    {
-        if (string.Equals(entry.Descriptor.ToolName, query, StringComparison.OrdinalIgnoreCase))
-        {
-            score += 0.1d;
-        }
-        else if (entry.Descriptor.ToolName.Contains(query, StringComparison.OrdinalIgnoreCase))
-        {
-            score += 0.03d;
-        }
-
-        return Math.Clamp(score, 0d, 1d);
-    }
+        => Math.Clamp(score + (CalculateToolNameSignal(entry, query, TokenSearchProfile.Empty) * ToolNameSignalWeight), 0d, 1d);
 
     private IReadOnlyList<ScoredToolEntry> RankLexically(
         ToolCatalogSnapshot snapshot,
-        McpGatewaySearchRequest request,
-        string effectiveQuery)
+        SearchInput searchInput)
     {
-        var queryProfile = BuildTokenSearchProfile(
-            BuildQueryTokenSearchSegments(request),
-            snapshot.TokenInverseDocumentFrequencies);
-        if (queryProfile.TermWeights.Count == 0)
+        var querySegments = BuildQueryTokenSearchSegments(searchInput);
+        var queryFields = BuildTokenizedSearchFields(querySegments);
+        var rawQueryProfile = BuildTokenSearchProfile(queryFields);
+        if (rawQueryProfile.TermWeights.Count == 0)
         {
-            return RankLegacyLexically(snapshot.Entries, effectiveQuery);
+            return RankLegacyLexically(snapshot.Entries, searchInput.BoostQuery);
         }
 
-        var lexicalSearchTerms = BuildLexicalTerms(BuildQueryTokenSearchSegments(request));
-        var rawQuery = request.Query?.Trim() ?? effectiveQuery;
-        return snapshot.Entries
-            .Select(entry => new ScoredToolEntry(entry, CalculateTokenSearchScore(
-                entry,
-                queryProfile,
-                lexicalSearchTerms,
-                rawQuery)))
+        var queryProfile = ApplyTokenInverseDocumentFrequencies(
+            rawQueryProfile,
+            snapshot.TokenInverseDocumentFrequencies);
+        var characterNGramProfile = BuildCharacterNGramProfile(
+            queryFields,
+            snapshot.CharacterNGramInverseDocumentFrequencies);
+        var lexicalSearchTerms = BuildLexicalTerms(querySegments);
+        var rawLexicalSearchTerms = BuildSearchTerms(searchInput.BoostQuery);
+        var candidates = RetrieveCandidates(
+            snapshot,
+            queryProfile,
+            rawQueryProfile,
+            characterNGramProfile,
+            rawLexicalSearchTerms,
+            searchInput.BoostQuery);
+
+        return candidates
+            .Select(candidate => new ScoredToolEntry(
+                candidate.Entry,
+                CalculateTokenSearchScore(
+                    candidate,
+                    queryProfile,
+                    rawQueryProfile,
+                    lexicalSearchTerms,
+                    searchInput.BoostQuery)))
             .OrderByDescending(static item => item.Score)
             .ThenBy(static item => item.Entry.Descriptor.ToolName, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
-    private static IReadOnlyList<ScoredToolEntry> RankLegacyLexically(
-        IReadOnlyList<ToolCatalogEntry> entries,
-        string query)
+    private static IReadOnlyList<RetrievalCandidate> RetrieveCandidates(
+        ToolCatalogSnapshot snapshot,
+        TokenSearchProfile queryProfile,
+        TokenSearchProfile rawQueryProfile,
+        TokenSearchProfile characterNGramProfile,
+        IReadOnlySet<string> rawLexicalSearchTerms,
+        string rawQuery)
     {
-        var searchTerms = BuildSearchTerms(query);
-        return entries
-            .Select(entry => new ScoredToolEntry(entry, CalculateLegacyLexicalScore(entry, query, searchTerms)))
-            .OrderByDescending(static item => item.Score)
-            .ThenBy(static item => item.Entry.Descriptor.ToolName, StringComparer.OrdinalIgnoreCase)
+        var retrievalCandidates = snapshot.Entries
+            .Select(entry => new RetrievalCandidate(
+                entry,
+                CalculateBm25Score(
+                    entry,
+                    rawQueryProfile,
+                    snapshot.TokenInverseDocumentFrequencies,
+                    snapshot.AverageSearchFieldLength),
+                CalculateSparseCosine(entry.TokenProfile, queryProfile),
+                CalculateSparseCosine(entry.CharacterNGramProfile, characterNGramProfile),
+                CalculateLegacyLexicalScore(entry, rawQuery, rawLexicalSearchTerms)))
+            .ToList();
+
+        var bm25Ranks = BuildRankLookup(retrievalCandidates, static candidate => candidate.Bm25Score);
+        var tokenRanks = BuildRankLookup(retrievalCandidates, static candidate => candidate.TokenSimilarity);
+        var characterRanks = BuildRankLookup(retrievalCandidates, static candidate => candidate.CharacterNGramSimilarity);
+        var legacyRanks = BuildRankLookup(retrievalCandidates, static candidate => candidate.LegacyLexicalScore);
+
+        return retrievalCandidates
+            .OrderByDescending(candidate =>
+                CalculateReciprocalRankFusionScore(candidate.Entry, bm25Ranks, tokenRanks, characterRanks, legacyRanks))
+            .ThenByDescending(static candidate => candidate.Bm25Score)
+            .ThenBy(static candidate => candidate.Entry.Descriptor.ToolName, StringComparer.OrdinalIgnoreCase)
+            .Take(ResolveCandidatePoolSize(retrievalCandidates.Count))
             .ToList();
     }
+
+    private static int ResolveCandidatePoolSize(int candidateCount)
+        => candidateCount <= 128
+            ? candidateCount
+            : Math.Min(StageOneCandidatePoolSize, candidateCount);
+
+    private static IReadOnlyDictionary<string, int> BuildRankLookup(
+        IReadOnlyList<RetrievalCandidate> candidates,
+        Func<RetrievalCandidate, double> scoreSelector)
+        => candidates
+            .OrderByDescending(scoreSelector)
+            .ThenBy(static candidate => candidate.Entry.Descriptor.ToolName, StringComparer.OrdinalIgnoreCase)
+            .Select((candidate, index) => new KeyValuePair<string, int>(candidate.Entry.Descriptor.ToolId, index + 1))
+            .ToDictionary(static item => item.Key, static item => item.Value, StringComparer.OrdinalIgnoreCase);
+
+    private static double CalculateReciprocalRankFusionScore(
+        ToolCatalogEntry entry,
+        IReadOnlyDictionary<string, int> bm25Ranks,
+        IReadOnlyDictionary<string, int> tokenRanks,
+        IReadOnlyDictionary<string, int> characterRanks,
+        IReadOnlyDictionary<string, int> legacyRanks)
+        => CalculateReciprocalRankComponent(entry, bm25Ranks)
+            + CalculateReciprocalRankComponent(entry, tokenRanks)
+            + CalculateReciprocalRankComponent(entry, characterRanks)
+            + CalculateReciprocalRankComponent(entry, legacyRanks);
+
+    private static double CalculateReciprocalRankComponent(
+        ToolCatalogEntry entry,
+        IReadOnlyDictionary<string, int> ranks)
+        => ranks.TryGetValue(entry.Descriptor.ToolId, out var rank)
+            ? 1d / (ReciprocalRankFusionConstant + rank)
+            : 0d;
 
     private static double CalculateTokenSearchScore(
-        ToolCatalogEntry entry,
+        RetrievalCandidate candidate,
         TokenSearchProfile queryProfile,
+        TokenSearchProfile rawQueryProfile,
         IReadOnlySet<string> lexicalSearchTerms,
         string rawQuery)
     {
-        var tokenSimilarity = CalculateSparseCosine(entry.TokenProfile, queryProfile);
-        var tokenCoverage = CalculateQueryCoverage(entry.TokenProfile, queryProfile);
-        var lexicalSimilarity = CalculateLexicalSimilarity(entry, rawQuery, lexicalSearchTerms);
-        var approximateTermSimilarity = CalculateApproximateTermSimilarity(entry, lexicalSearchTerms);
+        var bm25Score = NormalizePositiveScore(candidate.Bm25Score, 4d);
+        var tokenCoverage = Math.Max(
+            CalculateQueryCoverage(candidate.Entry.TokenProfile, queryProfile),
+            CalculateQueryCoverage(candidate.Entry.TokenProfile, rawQueryProfile));
+        var distinctCoverage = CalculateDistinctQueryCoverage(candidate.Entry, rawQueryProfile);
+        var approximateCoverage = CalculateApproximateQueryCoverage(candidate.Entry, rawQueryProfile);
+        var weightedApproximateCoverage = CalculateWeightedApproximateCoverage(candidate.Entry, queryProfile);
+        var matchBreadth = Math.Max(Math.Max(distinctCoverage, approximateCoverage), weightedApproximateCoverage);
+        var lexicalSimilarity = CalculateLexicalSimilarity(candidate.Entry, rawQuery, lexicalSearchTerms);
+        var toolNameSignal = CalculateToolNameSignal(candidate.Entry, rawQuery, rawQueryProfile);
+
         var score =
-            (tokenSimilarity * TokenSimilarityWeight) +
+            (bm25Score * Bm25FeatureWeight) +
+            (candidate.TokenSimilarity * TokenSimilarityWeight) +
+            (candidate.CharacterNGramSimilarity * CharacterNGramSimilarityWeight) +
             (tokenCoverage * TokenCoverageWeight) +
+            (matchBreadth * DistinctCoverageWeight) +
             (lexicalSimilarity * LexicalSimilarityWeight) +
-            (approximateTermSimilarity * ApproximateTermSimilarityWeight);
-        return ApplySearchBoosts(entry, rawQuery, score);
+            (candidate.LegacyLexicalScore * LegacyLexicalFeatureWeight) +
+            (toolNameSignal * ToolNameSignalWeight);
+
+        var evidenceCalibration = Math.Max(tokenCoverage, matchBreadth);
+        return Math.Clamp(score * evidenceCalibration, 0d, 1d);
+    }
+
+    private static double NormalizePositiveScore(double value, double scale)
+        => value <= double.Epsilon
+            ? 0d
+            : 1d - Math.Exp(-value / scale);
+
+    private static double CalculateBm25Score(
+        ToolCatalogEntry entry,
+        TokenSearchProfile queryProfile,
+        IReadOnlyDictionary<string, double> inverseDocumentFrequencies,
+        double averageFieldLength)
+    {
+        if (queryProfile.TermWeights.Count == 0)
+        {
+            return 0d;
+        }
+
+        var score = 0d;
+        foreach (var (term, queryWeight) in queryProfile.TermWeights)
+        {
+            var fieldScore = 0d;
+            foreach (var field in entry.SearchFields)
+            {
+                if (!field.TermWeights.TryGetValue(term, out var termFrequency) ||
+                    termFrequency <= double.Epsilon)
+                {
+                    continue;
+                }
+
+                var normalizedLength =
+                    1d - Bm25FieldLengthNormalization +
+                    (Bm25FieldLengthNormalization * (Math.Max(1, field.Length) / Math.Max(1d, averageFieldLength)));
+                var denominator = termFrequency + (Bm25K1 * normalizedLength);
+                if (denominator <= double.Epsilon)
+                {
+                    continue;
+                }
+
+                fieldScore += field.Weight * ((termFrequency * (Bm25K1 + 1d)) / denominator);
+            }
+
+            if (fieldScore <= double.Epsilon)
+            {
+                continue;
+            }
+
+            var inverseDocumentFrequency = inverseDocumentFrequencies.TryGetValue(term, out var value)
+                ? value
+                : 1d;
+            score += inverseDocumentFrequency * Math.Sqrt(queryWeight) * fieldScore;
+        }
+
+        return score;
     }
 
     private static double CalculateSparseCosine(
@@ -137,7 +265,6 @@ internal sealed partial class McpGatewayRuntime
         }
 
         var corpus = entry.LexicalTerms;
-
         var score = 0d;
         foreach (var term in searchTerms)
         {
@@ -157,10 +284,141 @@ internal sealed partial class McpGatewayRuntime
 
         if (entry.Descriptor.ToolName.Contains(query, StringComparison.OrdinalIgnoreCase))
         {
-            score += 2d;
+            score += 1.5d;
         }
 
-        return Math.Clamp(score / (searchTerms.Count + 2d), 0d, 1d);
+        return Math.Clamp(score / (searchTerms.Count + 1.5d), 0d, 1d);
+    }
+
+    private static double CalculateDistinctQueryCoverage(
+        ToolCatalogEntry entry,
+        TokenSearchProfile rawQueryProfile)
+    {
+        if (rawQueryProfile.TermWeights.Count == 0)
+        {
+            return 0d;
+        }
+
+        var matchedTerms = 0;
+        foreach (var term in rawQueryProfile.TermWeights.Keys)
+        {
+            if (entry.LexicalTerms.Contains(term) ||
+                entry.LexicalTerms.Any(candidate =>
+                    candidate.StartsWith(term, StringComparison.OrdinalIgnoreCase) ||
+                    term.StartsWith(candidate, StringComparison.OrdinalIgnoreCase)))
+            {
+                matchedTerms++;
+            }
+        }
+
+        return matchedTerms == 0
+            ? 0d
+            : Math.Clamp(matchedTerms / (double)rawQueryProfile.TermWeights.Count, 0d, 1d);
+    }
+
+    private static double CalculateApproximateQueryCoverage(
+        ToolCatalogEntry entry,
+        TokenSearchProfile rawQueryProfile)
+    {
+        if (rawQueryProfile.TermWeights.Count == 0)
+        {
+            return 0d;
+        }
+
+        var matchedTerms = 0;
+        foreach (var term in rawQueryProfile.TermWeights.Keys)
+        {
+            if (entry.LexicalTerms.Contains(term) ||
+                entry.LexicalTerms.Any(candidate =>
+                    candidate.StartsWith(term, StringComparison.OrdinalIgnoreCase) ||
+                    term.StartsWith(candidate, StringComparison.OrdinalIgnoreCase) ||
+                    CalculateApproximateTermSimilarity(term, candidate) > double.Epsilon))
+            {
+                matchedTerms++;
+            }
+        }
+
+        return matchedTerms == 0
+            ? 0d
+            : Math.Clamp(matchedTerms / (double)rawQueryProfile.TermWeights.Count, 0d, 1d);
+    }
+
+    private static double CalculateWeightedApproximateCoverage(
+        ToolCatalogEntry entry,
+        TokenSearchProfile queryProfile)
+    {
+        if (queryProfile.TotalWeight <= double.Epsilon)
+        {
+            return 0d;
+        }
+
+        var matchedWeight = 0d;
+        foreach (var (term, weight) in queryProfile.TermWeights)
+        {
+            if (entry.LexicalTerms.Contains(term) ||
+                entry.LexicalTerms.Any(candidate =>
+                    candidate.StartsWith(term, StringComparison.OrdinalIgnoreCase) ||
+                    term.StartsWith(candidate, StringComparison.OrdinalIgnoreCase) ||
+                    CalculateApproximateTermSimilarity(term, candidate) > double.Epsilon))
+            {
+                matchedWeight += weight;
+            }
+        }
+
+        return matchedWeight <= double.Epsilon
+            ? 0d
+            : Math.Clamp(matchedWeight / queryProfile.TotalWeight, 0d, 1d);
+    }
+
+    private static double CalculateToolNameSignal(
+        ToolCatalogEntry entry,
+        string rawQuery,
+        TokenSearchProfile rawQueryProfile)
+    {
+        if (string.IsNullOrWhiteSpace(rawQuery))
+        {
+            return 0d;
+        }
+
+        if (string.Equals(entry.Descriptor.ToolName, rawQuery, StringComparison.OrdinalIgnoreCase))
+        {
+            return 1d;
+        }
+
+        var humanizedToolName = HumanizeIdentifier(entry.Descriptor.ToolName);
+        if (humanizedToolName.Contains(rawQuery, StringComparison.OrdinalIgnoreCase) ||
+            entry.Descriptor.ToolName.Contains(rawQuery, StringComparison.OrdinalIgnoreCase))
+        {
+            return 0.5d;
+        }
+
+        if (rawQueryProfile.TermWeights.Count == 0)
+        {
+            return 0d;
+        }
+
+        var toolNameTerms = BuildSearchTerms(entry.Descriptor.ToolName);
+        if (toolNameTerms.Count == 0)
+        {
+            return 0d;
+        }
+
+        var matchedTerms = rawQueryProfile.TermWeights.Keys.Count(toolNameTerms.Contains);
+        return matchedTerms == 0
+            ? 0d
+            : Math.Clamp(matchedTerms / (double)Math.Max(1, toolNameTerms.Count), 0d, 1d);
+    }
+
+    private static IReadOnlyList<ScoredToolEntry> RankLegacyLexically(
+        IReadOnlyList<ToolCatalogEntry> entries,
+        string query)
+    {
+        var searchTerms = BuildSearchTerms(query);
+        return entries
+            .Select(entry => new ScoredToolEntry(entry, CalculateLegacyLexicalScore(entry, query, searchTerms)))
+            .OrderByDescending(static item => item.Score)
+            .ThenBy(static item => item.Entry.Descriptor.ToolName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static double CalculateLegacyLexicalScore(
@@ -171,9 +429,9 @@ internal sealed partial class McpGatewayRuntime
         var lexicalSimilarity = CalculateLexicalSimilarity(entry, query, searchTerms);
         var approximateTermSimilarity = CalculateApproximateTermSimilarity(entry, searchTerms);
         var score =
-            (lexicalSimilarity * 0.75d) +
-            (approximateTermSimilarity * 0.25d);
-        return ApplySearchBoosts(entry, query, score);
+            (lexicalSimilarity * 0.7d) +
+            (approximateTermSimilarity * 0.3d);
+        return Math.Clamp(score, 0d, 1d);
     }
 
     private static double CalculateApproximateTermSimilarity(
@@ -371,5 +629,4 @@ internal sealed partial class McpGatewayRuntime
 
         return CreateTokenSearchProfile(weightedTerms);
     }
-
 }

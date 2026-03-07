@@ -36,6 +36,7 @@ public sealed partial class McpGatewaySearchTests
 
         await Assert.That(options.SearchStrategy).IsEqualTo(McpGatewaySearchStrategy.Auto);
         await Assert.That(options.TokenSearchTokenizer).IsEqualTo(McpGatewayTokenSearchTokenizer.ChatGptO200kBase);
+        await Assert.That(options.SearchQueryNormalization).IsEqualTo(McpGatewaySearchQueryNormalization.TranslateToEnglishWhenAvailable);
         await Assert.That(options.DefaultSearchLimit).IsEqualTo(5);
     }
 

@@ -27,10 +27,11 @@ dotnet add package ManagedCode.MCPGateway
 - configurable search strategy with embeddings or tokenizer-backed heuristic ranking
 - `SearchStrategy.Auto` by default: use embeddings when available, otherwise fall back to tokenizer-backed ranking automatically
 - `McpGatewayTokenSearchTokenizer.ChatGptO200kBase` by default for tokenizer search and tokenizer fallback
+- optional English query normalization before ranking when a keyed search rewrite `IChatClient` is registered
 - top 5 matches by default when `maxResults` is not specified
 - vector search when an `IEmbeddingGenerator<string, Embedding<float>>` is registered
 - optional persisted tool embeddings through `IMcpGatewayToolEmbeddingStore`
-- token-aware lexical fallback when embeddings are unavailable
+- token-aware lexical fallback when embeddings are unavailable or vector search cannot complete
 - one invoke surface for both local `AIFunction` tools and MCP tools
 - optional meta-tools you can hand back to another model as normal `AITool` instances
 
@@ -156,6 +157,7 @@ Default search profile:
 
 - `SearchStrategy = McpGatewaySearchStrategy.Auto`
 - `TokenSearchTokenizer = McpGatewayTokenSearchTokenizer.ChatGptO200kBase`
+- `SearchQueryNormalization = McpGatewaySearchQueryNormalization.TranslateToEnglishWhenAvailable`
 - `DefaultSearchLimit = 5`
 - `MaxSearchResults = 20`
 
@@ -163,8 +165,14 @@ Default search profile:
 
 - vector search when an embedding generator is registered
 - tokenizer-backed heuristic search when embeddings are unavailable
+- tokenizer-backed fallback when vector search cannot complete for a request
 
-The tokenizer-backed mode builds sparse term vectors from tool names, descriptions, required arguments, and schema properties, then scores tools with weighted token overlap and lexical boosts. Available tokenizer profiles are:
+The tokenizer-backed mode builds field-aware search documents from tool names, display names, descriptions, required arguments, and schema properties. Ranking then happens in two stages:
+
+- stage 1 retrieval with BM25-style field scoring, tokenizer-term cosine similarity, and character 3-gram similarity
+- stage 2 reranking over the candidate pool with calibrated coverage, lexical similarity, approximate typo matching, and tool-name evidence
+
+This keeps the search mathematical and tokenizer-driven instead of relying on hand-written query phrase exceptions. Available tokenizer profiles are:
 
 - `McpGatewayTokenSearchTokenizer.ChatGptO200kBase` for the GPT-4o / ChatGPT tokenizer family
 - `McpGatewayTokenSearchTokenizer.Gpt2Bpe` for a GPT-2-compatible BPE encoding (`r50k_base`)
@@ -172,6 +180,53 @@ The tokenizer-backed mode builds sparse term vectors from tool names, descriptio
 If an embedding generator is registered and vector search is active, the gateway vectorizes descriptor documents and uses cosine similarity plus lexical boosts. It first tries the keyed registration `McpGatewayServiceKeys.EmbeddingGenerator` and then falls back to any regular `IEmbeddingGenerator<string, Embedding<float>>`.
 
 The embedding generator is resolved per gateway operation, so singleton, scoped, and transient DI registrations all work with index builds and search.
+
+## Optional English Query Normalization
+
+By default, the gateway may rewrite the incoming search query into concise English before ranking:
+
+- it only happens when `options.SearchQueryNormalization` is enabled
+- it only uses a keyed `IChatClient` registered as `McpGatewayServiceKeys.SearchQueryChatClient`
+- if no keyed chat client is registered, search continues unchanged
+- if normalization fails, search continues with the original query and emits a diagnostic
+
+Preferred registration:
+
+```csharp
+var services = new ServiceCollection();
+
+services.AddKeyedSingleton<IChatClient>(
+    McpGatewayServiceKeys.SearchQueryChatClient,
+    mySearchRewriteChatClient);
+
+services.AddManagedCodeMcpGateway(options =>
+{
+    options.SearchStrategy = McpGatewaySearchStrategy.Auto;
+    options.SearchQueryNormalization = McpGatewaySearchQueryNormalization.TranslateToEnglishWhenAvailable;
+
+    options.AddTool(
+        "local",
+        AIFunctionFactory.Create(
+            static (string query) => $"travel:{query}",
+            new AIFunctionFactoryOptions
+            {
+                Name = "travel_hotel_search",
+                Description = "Find hotels by city, district, amenities, breakfast, or cancellation policy."
+            }));
+});
+```
+
+Disable normalization when the host wants purely local tokenizer behavior:
+
+```csharp
+services.AddManagedCodeMcpGateway(options =>
+{
+    options.SearchStrategy = McpGatewaySearchStrategy.Tokenizer;
+    options.SearchQueryNormalization = McpGatewaySearchQueryNormalization.Disabled;
+});
+```
+
+The package does not register or configure an `IChatClient` for you. This keeps the gateway generic while still allowing multilingual and typo-heavy search inputs to converge to an English retrieval form when the host opts in.
 
 `McpGatewaySearchResult.RankingMode` stays:
 
@@ -356,7 +411,8 @@ var result = await gateway.SearchAsync("review qeue for managedcode prs");
 With no embedding generator registered:
 
 - the gateway still builds the catalog
-- search uses the configured tokenizer profile
+- search uses the configured tokenizer profile and two-stage lexical ranking
+- an optional keyed search rewrite `IChatClient` can normalize the query to English first
 - typo-tolerant term heuristics still participate in ranking
 - the result diagnostics contain `lexical_fallback`
 - the default result set size is 5

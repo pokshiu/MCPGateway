@@ -21,22 +21,32 @@ internal sealed partial class McpGatewayRuntime
 
     private sealed record ScoredToolEntry(ToolCatalogEntry Entry, double Score);
 
+    private sealed record RetrievalCandidate(
+        ToolCatalogEntry Entry,
+        double Bm25Score,
+        double TokenSimilarity,
+        double CharacterNGramSimilarity,
+        double LegacyLexicalScore);
+
     private sealed record ToolCatalogEntry(
         McpGatewayToolDescriptor Descriptor,
         AITool Tool,
         string Document,
-        IReadOnlyList<WeightedTextSegment> TokenSearchSegments,
+        IReadOnlyList<TokenizedSearchField> SearchFields,
         IReadOnlySet<string> LexicalTerms,
         TokenSearchProfile TokenProfile,
+        TokenSearchProfile CharacterNGramProfile,
         float[]? Vector = null,
         double Magnitude = 0d);
 
     private sealed record ToolCatalogSnapshot(
         IReadOnlyList<ToolCatalogEntry> Entries,
         bool HasVectors,
-        IReadOnlyDictionary<string, double> TokenInverseDocumentFrequencies)
+        IReadOnlyDictionary<string, double> TokenInverseDocumentFrequencies,
+        IReadOnlyDictionary<string, double> CharacterNGramInverseDocumentFrequencies,
+        double AverageSearchFieldLength)
     {
-        public static ToolCatalogSnapshot Empty { get; } = new([], false, EmptyTokenWeights);
+        public static ToolCatalogSnapshot Empty { get; } = new([], false, EmptyTokenWeights, EmptyTokenWeights, 1d);
     }
 
     private sealed record RuntimeState(
@@ -51,6 +61,12 @@ internal sealed partial class McpGatewayRuntime
 
     private sealed record WeightedTextSegment(string Text, double Weight);
 
+    private sealed record TokenizedSearchField(
+        double Weight,
+        int Length,
+        IReadOnlyDictionary<string, double> TermWeights,
+        IReadOnlyDictionary<string, double> CharacterNGramWeights);
+
     private sealed record TokenSearchProfile(
         IReadOnlyDictionary<string, double> TermWeights,
         IReadOnlySet<string> Terms,
@@ -62,6 +78,47 @@ internal sealed partial class McpGatewayRuntime
             new HashSet<string>(StringComparer.OrdinalIgnoreCase),
             0d,
             0d);
+    }
+
+    private sealed record SearchInput(
+        string? OriginalQuery,
+        string? NormalizedQuery,
+        string? ContextSummary,
+        string? FlattenedContext)
+    {
+        public string EffectiveQuery
+        {
+            get
+            {
+                List<string> parts = [];
+
+                if (!string.IsNullOrWhiteSpace(NormalizedQuery))
+                {
+                    parts.Add(NormalizedQuery.Trim());
+                }
+                else if (!string.IsNullOrWhiteSpace(OriginalQuery))
+                {
+                    parts.Add(OriginalQuery.Trim());
+                }
+
+                if (!string.IsNullOrWhiteSpace(ContextSummary))
+                {
+                    parts.Add(string.Concat(ContextSummaryPrefix, ContextSummary.Trim()));
+                }
+
+                if (!string.IsNullOrWhiteSpace(FlattenedContext))
+                {
+                    parts.Add(string.Concat(ContextPrefix, FlattenedContext));
+                }
+
+                return string.Join(" | ", parts);
+            }
+        }
+
+        public string BoostQuery
+            => !string.IsNullOrWhiteSpace(NormalizedQuery)
+                ? NormalizedQuery.Trim()
+                : OriginalQuery?.Trim() ?? EffectiveQuery;
     }
 
     private sealed class EmbeddingGeneratorLease(
@@ -80,6 +137,16 @@ internal sealed partial class McpGatewayRuntime
         : IAsyncDisposable
     {
         public IMcpGatewayToolEmbeddingStore? Store { get; } = store;
+
+        public ValueTask DisposeAsync() => scope?.DisposeAsync() ?? ValueTask.CompletedTask;
+    }
+
+    private sealed class ChatClientLease(
+        IChatClient? client,
+        AsyncServiceScope? scope = null)
+        : IAsyncDisposable
+    {
+        public IChatClient? Client { get; } = client;
 
         public ValueTask DisposeAsync() => scope?.DisposeAsync() ?? ValueTask.CompletedTask;
     }

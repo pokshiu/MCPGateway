@@ -91,25 +91,35 @@ internal sealed partial class McpGatewayRuntime
                 }
 
                 var tokenSearchSegments = BuildDescriptorTokenSearchSegments(descriptor);
+                var searchFields = BuildTokenizedSearchFields(tokenSearchSegments);
                 entries.Add(new ToolCatalogEntry(
                     descriptor,
                     tool,
                     BuildDescriptorDocument(descriptor, tool),
-                    tokenSearchSegments,
+                    searchFields,
                     BuildLexicalTerms(tokenSearchSegments),
+                    TokenSearchProfile.Empty,
                     TokenSearchProfile.Empty));
             }
         }
 
         var rawTokenProfiles = entries
-            .Select(entry => BuildTokenSearchProfile(entry.TokenSearchSegments))
+            .Select(entry => BuildTokenSearchProfile(entry.SearchFields))
+            .ToList();
+        var rawCharacterNGramProfiles = entries
+            .Select(entry => BuildCharacterNGramProfile(entry.SearchFields))
             .ToList();
         var tokenInverseDocumentFrequencies = BuildTokenInverseDocumentFrequencies(rawTokenProfiles);
+        var characterNGramInverseDocumentFrequencies = BuildTokenInverseDocumentFrequencies(rawCharacterNGramProfiles);
+        var averageSearchFieldLength = CalculateAverageSearchFieldLength(entries);
         for (var index = 0; index < entries.Count; index++)
         {
             entries[index] = entries[index] with
             {
-                TokenProfile = ApplyTokenInverseDocumentFrequencies(rawTokenProfiles[index], tokenInverseDocumentFrequencies)
+                TokenProfile = ApplyTokenInverseDocumentFrequencies(rawTokenProfiles[index], tokenInverseDocumentFrequencies),
+                CharacterNGramProfile = ApplyTokenInverseDocumentFrequencies(
+                    rawCharacterNGramProfiles[index],
+                    characterNGramInverseDocumentFrequencies)
             };
         }
 
@@ -251,7 +261,9 @@ internal sealed partial class McpGatewayRuntime
                 .ThenBy(static item => item.Descriptor.SourceId, StringComparer.OrdinalIgnoreCase)
                 .ToList(),
             isVectorSearchEnabled,
-            tokenInverseDocumentFrequencies);
+            tokenInverseDocumentFrequencies,
+            characterNGramInverseDocumentFrequencies,
+            averageSearchFieldLength);
 
         TryUpdateState(snapshot, registrySnapshot.Version);
 
@@ -287,5 +299,23 @@ internal sealed partial class McpGatewayRuntime
                 return;
             }
         }
+    }
+
+    private static double CalculateAverageSearchFieldLength(IReadOnlyList<ToolCatalogEntry> entries)
+    {
+        var totalLength = 0d;
+        var fieldCount = 0;
+        foreach (var entry in entries)
+        {
+            foreach (var field in entry.SearchFields)
+            {
+                totalLength += Math.Max(1, field.Length);
+                fieldCount++;
+            }
+        }
+
+        return fieldCount == 0
+            ? 1d
+            : totalLength / fieldCount;
     }
 }

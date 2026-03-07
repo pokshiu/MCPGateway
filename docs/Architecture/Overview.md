@@ -99,4 +99,5 @@ flowchart LR
 ## Related Docs
 
 - [`README.md`](../../README.md)
+- [`docs/Features/SearchQueryNormalizationAndRanking.md`](../Features/SearchQueryNormalizationAndRanking.md)
 - [`AGENTS.md`](../../AGENTS.md)

@@ -39,9 +39,9 @@ internal sealed partial class McpGatewayRuntime
             return new McpGatewaySearchResult([], diagnostics, SearchModeEmpty);
         }
 
-        var rawQuery = request.Query?.Trim();
-        var effectiveQuery = BuildEffectiveSearchQuery(request);
-        if (string.IsNullOrWhiteSpace(effectiveQuery))
+        var normalizedQuery = await NormalizeSearchQueryAsync(request.Query, diagnostics, cancellationToken);
+        var searchInput = BuildSearchInput(request, normalizedQuery);
+        if (string.IsNullOrWhiteSpace(searchInput.EffectiveQuery))
         {
             var browse = snapshot.Entries
                 .Take(limit)
@@ -60,7 +60,7 @@ internal sealed partial class McpGatewayRuntime
                 await using var embeddingGeneratorLease = ResolveEmbeddingGenerator();
                 if (embeddingGeneratorLease.Generator is IEmbeddingGenerator<string, Embedding<float>> generator)
                 {
-                    var embedding = await generator.GenerateAsync(effectiveQuery, cancellationToken: cancellationToken);
+                    var embedding = await generator.GenerateAsync(searchInput.EffectiveQuery, cancellationToken: cancellationToken);
                     var queryVector = embedding.Vector.ToArray();
                     var queryMagnitude = CalculateMagnitude(queryVector);
                     if (queryMagnitude > double.Epsilon)
@@ -70,7 +70,7 @@ internal sealed partial class McpGatewayRuntime
                                 entry,
                                 ApplySearchBoosts(
                                     entry,
-                                    rawQuery ?? effectiveQuery,
+                                    searchInput.BoostQuery,
                                     CalculateCosine(entry, queryVector, queryMagnitude))))
                             .OrderByDescending(static item => item.Score)
                             .ThenBy(static item => item.Entry.Descriptor.ToolName, StringComparer.OrdinalIgnoreCase)
@@ -79,13 +79,13 @@ internal sealed partial class McpGatewayRuntime
                     }
                     else
                     {
-                        ranked = RankLexically(snapshot, request, effectiveQuery);
+                        ranked = RankLexically(snapshot, searchInput);
                         diagnostics.Add(new McpGatewayDiagnostic(QueryVectorEmptyDiagnosticCode, QueryVectorEmptyMessage));
                     }
                 }
                 else
                 {
-                    ranked = RankLexically(snapshot, request, effectiveQuery);
+                    ranked = RankLexically(snapshot, searchInput);
                     diagnostics.Add(new McpGatewayDiagnostic(
                         LexicalFallbackDiagnosticCode,
                         LexicalFallbackMessage));
@@ -93,7 +93,7 @@ internal sealed partial class McpGatewayRuntime
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                ranked = RankLexically(snapshot, request, effectiveQuery);
+                ranked = RankLexically(snapshot, searchInput);
                 diagnostics.Add(new McpGatewayDiagnostic(
                     VectorSearchFailedDiagnosticCode,
                     string.Format(CultureInfo.InvariantCulture, VectorSearchFailedMessageFormat, ex.GetBaseException().Message)));
@@ -102,7 +102,7 @@ internal sealed partial class McpGatewayRuntime
         }
         else
         {
-            ranked = RankLexically(snapshot, request, effectiveQuery);
+            ranked = RankLexically(snapshot, searchInput);
             if (_searchStrategy is not McpGatewaySearchStrategy.Tokenizer)
             {
                 diagnostics.Add(new McpGatewayDiagnostic(

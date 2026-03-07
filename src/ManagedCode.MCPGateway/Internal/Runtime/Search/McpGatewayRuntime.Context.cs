@@ -6,28 +6,14 @@ namespace ManagedCode.MCPGateway;
 
 internal sealed partial class McpGatewayRuntime
 {
-    private static string BuildEffectiveSearchQuery(McpGatewaySearchRequest request)
-    {
-        List<string> parts = [];
-
-        if (!string.IsNullOrWhiteSpace(request.Query))
-        {
-            parts.Add(request.Query.Trim());
-        }
-
-        if (!string.IsNullOrWhiteSpace(request.ContextSummary))
-        {
-            parts.Add(string.Concat(ContextSummaryPrefix, request.ContextSummary.Trim()));
-        }
-
-        var flattenedContext = FlattenContext(request.Context);
-        if (!string.IsNullOrWhiteSpace(flattenedContext))
-        {
-            parts.Add(string.Concat(ContextPrefix, flattenedContext));
-        }
-
-        return string.Join(" | ", parts);
-    }
+    private static SearchInput BuildSearchInput(
+        McpGatewaySearchRequest request,
+        string? normalizedQuery)
+        => new(
+            request.Query?.Trim(),
+            string.IsNullOrWhiteSpace(normalizedQuery) ? null : normalizedQuery.Trim(),
+            request.ContextSummary?.Trim(),
+            FlattenContext(request.Context));
 
     private static string? FlattenContext(IReadOnlyDictionary<string, object?>? context)
     {

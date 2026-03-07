@@ -73,13 +73,24 @@ internal sealed partial class McpGatewayRuntime
     }
 
     private static IReadOnlyList<WeightedTextSegment> BuildQueryTokenSearchSegments(
-        McpGatewaySearchRequest request)
+        SearchInput searchInput)
     {
         var segments = new List<WeightedTextSegment>();
 
-        AddTokenSearchTextSegment(segments, request.Query, QueryTokenWeight);
-        AddTokenSearchTextSegment(segments, request.ContextSummary, ContextSummaryTokenWeight);
-        AddTokenSearchTextSegment(segments, FlattenContext(request.Context), ContextTokenWeight);
+        AddTokenSearchTextSegment(segments, searchInput.NormalizedQuery, QueryTokenWeight);
+
+        if (!string.IsNullOrWhiteSpace(searchInput.OriginalQuery) &&
+            !string.Equals(searchInput.OriginalQuery, searchInput.NormalizedQuery, StringComparison.OrdinalIgnoreCase))
+        {
+            AddTokenSearchTextSegment(segments, searchInput.OriginalQuery, OriginalQueryBackoffWeight);
+        }
+        else
+        {
+            AddTokenSearchTextSegment(segments, searchInput.OriginalQuery, QueryTokenWeight);
+        }
+
+        AddTokenSearchTextSegment(segments, searchInput.ContextSummary, ContextSummaryTokenWeight);
+        AddTokenSearchTextSegment(segments, searchInput.FlattenedContext, ContextTokenWeight);
 
         return segments;
     }
