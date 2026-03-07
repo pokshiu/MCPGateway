@@ -145,6 +145,16 @@ public sealed partial class McpGatewaySearchTests
     }
 
     [TUnit.Core.Test]
+    public async Task AddManagedCodeMcpGateway_RegistryAlsoActsAsCatalogSource()
+    {
+        await using var serviceProvider = GatewayTestServiceProviderFactory.Create(static _ => { });
+        var registry = serviceProvider.GetRequiredService<IMcpGatewayRegistry>();
+
+        await Assert.That(registry).IsTypeOf<McpGatewayRegistry>();
+        await Assert.That(registry is IMcpGatewayCatalogSource).IsTrue();
+    }
+
+    [TUnit.Core.Test]
     public async Task McpGateway_DoesNotExposeRegistryMutations()
     {
         await using var serviceProvider = GatewayTestServiceProviderFactory.Create(static _ => { });

@@ -46,6 +46,7 @@ internal sealed partial class McpGatewayRuntime : IMcpGateway
     private const string ToolIdOrToolNameRequiredMessage = "Either ToolId or ToolName is required.";
     private const string ToolIdNotFoundMessageTemplate = "Tool '{0}' was not found.";
     private const string ToolNameAmbiguousMessageTemplate = "Tool '{0}' is ambiguous. Use ToolId or specify SourceId explicitly.";
+    private const string CatalogSourceMissingMessage = "ManagedCode.MCPGateway requires IMcpGatewayRegistry to be registered in the service provider. Use AddManagedCodeMcpGateway(...) to wire the package services.";
     private const string FailedToLoadGatewaySourceLogMessage = "Failed to load gateway source {SourceId}.";
     private const string EmbeddingGenerationFailedLogMessage = "Gateway embedding generation failed. Falling back to lexical search.";
     private const string GatewayIndexRebuiltLogMessage = "Gateway index rebuilt. Tools={ToolCount} VectorizedTools={VectorizedToolCount}.";
@@ -173,7 +174,6 @@ internal sealed partial class McpGatewayRuntime : IMcpGateway
     private readonly ILogger<McpGateway> _logger;
     private readonly ILoggerFactory _loggerFactory;
     private readonly IMcpGatewayCatalogSource _catalogSource;
-    private readonly IAsyncDisposable? _ownedCatalogSource;
     private readonly McpGatewaySearchStrategy _searchStrategy;
     private readonly McpGatewaySearchQueryNormalization _searchQueryNormalization;
     private readonly Tokenizer _searchTokenizer;
@@ -199,17 +199,7 @@ internal sealed partial class McpGatewayRuntime : IMcpGateway
         _loggerFactory = loggerFactory;
 
         var resolvedOptions = options.Value;
-        var catalogSource = serviceProvider.GetService<IMcpGatewayCatalogSource>();
-        if (catalogSource is null)
-        {
-            var ownedCatalogSource = new McpGatewayRegistry(new McpGatewayRegistryState(options));
-            _catalogSource = ownedCatalogSource;
-            _ownedCatalogSource = ownedCatalogSource;
-        }
-        else
-        {
-            _catalogSource = catalogSource;
-        }
+        _catalogSource = ResolveCatalogSource(serviceProvider);
         _searchStrategy = resolvedOptions.SearchStrategy;
         _searchQueryNormalization = resolvedOptions.SearchQueryNormalization;
         _searchTokenizer = McpGatewayTokenSearchTokenizerFactory.GetTokenizer(resolvedOptions.TokenSearchTokenizer);
@@ -223,18 +213,30 @@ internal sealed partial class McpGatewayRuntime : IMcpGateway
         string invokeToolName = McpGatewayToolSet.DefaultInvokeToolName)
         => new McpGatewayToolSet(this).CreateTools(searchToolName, invokeToolName);
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         var previousState = Interlocked.Exchange(ref _state, RuntimeState.Disposed);
         if (previousState.IsDisposed)
         {
-            return;
+            return ValueTask.CompletedTask;
         }
 
-        if (_ownedCatalogSource is not null)
+        return ValueTask.CompletedTask;
+    }
+
+    private static IMcpGatewayCatalogSource ResolveCatalogSource(IServiceProvider serviceProvider)
+    {
+        if (serviceProvider.GetService<IMcpGatewayCatalogSource>() is IMcpGatewayCatalogSource catalogSource)
         {
-            await _ownedCatalogSource.DisposeAsync();
+            return catalogSource;
         }
+
+        if (serviceProvider.GetService<IMcpGatewayRegistry>() is IMcpGatewayCatalogSource registryCatalogSource)
+        {
+            return registryCatalogSource;
+        }
+
+        throw new InvalidOperationException(CatalogSourceMissingMessage);
     }
 
     private void ThrowIfDisposed()
