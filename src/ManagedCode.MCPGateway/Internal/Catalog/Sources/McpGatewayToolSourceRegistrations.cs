@@ -146,7 +146,7 @@ internal abstract class McpGatewayClientToolSourceRegistration(
 {
     private readonly bool _disposeClient = disposeClient;
     private McpClient? _client;
-    private Task<McpClient>? _clientTask;
+    private ClientOperation? _clientOperation;
     private int _disposed;
 
     public override async ValueTask<IReadOnlyList<AITool>> LoadToolsAsync(
@@ -188,17 +188,40 @@ internal abstract class McpGatewayClientToolSourceRegistration(
             return client;
         }
 
-        var clientTask = Volatile.Read(ref _clientTask);
-        while (clientTask is null && !cancellationToken.IsCancellationRequested)
+        var clientTask = Volatile.Read(ref _clientOperation);
+        while (!cancellationToken.IsCancellationRequested)
         {
-            var createdTask = CreateClientAsync(loggerFactory, CancellationToken.None).AsTask();
-            if (Interlocked.CompareExchange(ref _clientTask, createdTask, null) is null)
+            if (clientTask is null)
             {
-                clientTask = createdTask;
-                break;
+                var clientSource = new TaskCompletionSource<McpClient>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var createdTask = new ClientOperation(clientSource.Task, cancellationToken);
+                if (Interlocked.CompareExchange(ref _clientOperation, createdTask, null) is null)
+                {
+                    _ = RunCreateClientAsync(clientSource, loggerFactory, createdTask);
+                    clientTask = createdTask;
+                    break;
+                }
+
+                clientTask = Volatile.Read(ref _clientOperation);
+                continue;
             }
 
-            clientTask = Volatile.Read(ref _clientTask);
+            if (clientTask.CancellationToken.IsCancellationRequested)
+            {
+                await AwaitCanceledClientCreationAsync(clientTask);
+                _ = Interlocked.CompareExchange(ref _clientOperation, null, clientTask);
+                clientTask = Volatile.Read(ref _clientOperation);
+                continue;
+            }
+
+            if (clientTask.Task.IsCanceled || clientTask.Task.IsFaulted)
+            {
+                _ = Interlocked.CompareExchange(ref _clientOperation, null, clientTask);
+                clientTask = Volatile.Read(ref _clientOperation);
+                continue;
+            }
+
+            break;
         }
 
         if (clientTask is null)
@@ -206,7 +229,26 @@ internal abstract class McpGatewayClientToolSourceRegistration(
             cancellationToken.ThrowIfCancellationRequested();
         }
 
-        return await AwaitClientTaskAsync(clientTask!, cancellationToken);
+        return await AwaitClientTaskAsync(clientTask!.Task, cancellationToken);
+    }
+
+    private async Task RunCreateClientAsync(
+        TaskCompletionSource<McpClient> clientSource,
+        ILoggerFactory loggerFactory,
+        ClientOperation clientOperation)
+    {
+        try
+        {
+            clientSource.SetResult(await CreateClientAsync(loggerFactory, clientOperation.CancellationToken));
+        }
+        catch (OperationCanceledException) when (clientOperation.CancellationToken.IsCancellationRequested)
+        {
+            clientSource.SetCanceled(clientOperation.CancellationToken);
+        }
+        catch (Exception ex)
+        {
+            clientSource.SetException(ex);
+        }
     }
 
     private async Task<McpClient> AwaitClientTaskAsync(
@@ -231,8 +273,27 @@ internal abstract class McpGatewayClientToolSourceRegistration(
         }
         catch when (clientTask.IsFaulted || clientTask.IsCanceled)
         {
-            _ = Interlocked.CompareExchange(ref _clientTask, null, clientTask);
+            if (Volatile.Read(ref _clientOperation) is { Task: { } currentTask } currentOperation &&
+                ReferenceEquals(currentTask, clientTask))
+            {
+                _ = Interlocked.CompareExchange(ref _clientOperation, null, currentOperation);
+            }
             throw;
         }
     }
+
+    private static async Task AwaitCanceledClientCreationAsync(ClientOperation clientOperation)
+    {
+        try
+        {
+            await clientOperation.Task;
+        }
+        catch (OperationCanceledException) when (clientOperation.CancellationToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    private sealed record ClientOperation(
+        Task<McpClient> Task,
+        CancellationToken CancellationToken);
 }

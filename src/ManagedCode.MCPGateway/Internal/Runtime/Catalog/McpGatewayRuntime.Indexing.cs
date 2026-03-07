@@ -10,20 +10,42 @@ internal sealed partial class McpGatewayRuntime
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var existingBuild = Volatile.Read(ref _buildTask);
-        while (existingBuild is null && !cancellationToken.IsCancellationRequested)
+        var existingBuild = Volatile.Read(ref _buildOperation);
+        while (!cancellationToken.IsCancellationRequested)
         {
             ThrowIfDisposed();
 
-            var buildSource = new TaskCompletionSource<McpGatewayIndexBuildResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-            if (Interlocked.CompareExchange(ref _buildTask, buildSource.Task, null) is null)
+            if (existingBuild is null)
             {
-                _ = RunBuildIndexAsync(buildSource);
-                existingBuild = buildSource.Task;
-                break;
+                var buildSource = new TaskCompletionSource<McpGatewayIndexBuildResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var createdBuild = new BuildOperation(buildSource.Task, cancellationToken);
+                if (Interlocked.CompareExchange(ref _buildOperation, createdBuild, null) is null)
+                {
+                    _ = RunBuildIndexAsync(buildSource, createdBuild);
+                    existingBuild = createdBuild;
+                    break;
+                }
+
+                existingBuild = Volatile.Read(ref _buildOperation);
+                continue;
             }
 
-            existingBuild = Volatile.Read(ref _buildTask);
+            if (existingBuild.CancellationToken.IsCancellationRequested)
+            {
+                await AwaitCanceledBuildAsync(existingBuild);
+                _ = Interlocked.CompareExchange(ref _buildOperation, null, existingBuild);
+                existingBuild = Volatile.Read(ref _buildOperation);
+                continue;
+            }
+
+            if (existingBuild.Task.IsCanceled || existingBuild.Task.IsFaulted)
+            {
+                _ = Interlocked.CompareExchange(ref _buildOperation, null, existingBuild);
+                existingBuild = Volatile.Read(ref _buildOperation);
+                continue;
+            }
+
+            break;
         }
 
         if (existingBuild is null)
@@ -31,14 +53,20 @@ internal sealed partial class McpGatewayRuntime
             cancellationToken.ThrowIfCancellationRequested();
         }
 
-        return await existingBuild!.WaitAsync(cancellationToken);
+        return await existingBuild!.Task.WaitAsync(cancellationToken);
     }
 
-    private async Task RunBuildIndexAsync(TaskCompletionSource<McpGatewayIndexBuildResult> buildSource)
+    private async Task RunBuildIndexAsync(
+        TaskCompletionSource<McpGatewayIndexBuildResult> buildSource,
+        BuildOperation buildOperation)
     {
         try
         {
-            buildSource.SetResult(await BuildIndexCoreAsync());
+            buildSource.SetResult(await BuildIndexCoreAsync(buildOperation.CancellationToken));
+        }
+        catch (OperationCanceledException) when (buildOperation.CancellationToken.IsCancellationRequested)
+        {
+            buildSource.SetCanceled(buildOperation.CancellationToken);
         }
         catch (Exception ex)
         {
@@ -46,12 +74,13 @@ internal sealed partial class McpGatewayRuntime
         }
         finally
         {
-            _ = Interlocked.CompareExchange(ref _buildTask, null, buildSource.Task);
+            _ = Interlocked.CompareExchange(ref _buildOperation, null, buildOperation);
         }
     }
 
-    private async Task<McpGatewayIndexBuildResult> BuildIndexCoreAsync()
+    private async Task<McpGatewayIndexBuildResult> BuildIndexCoreAsync(CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
 
         var registrySnapshot = _catalogSource.CreateSnapshot();
@@ -64,7 +93,7 @@ internal sealed partial class McpGatewayRuntime
             IReadOnlyList<AITool> tools;
             try
             {
-                tools = await registration.LoadToolsAsync(_loggerFactory, CancellationToken.None);
+                tools = await registration.LoadToolsAsync(_loggerFactory, cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -154,7 +183,7 @@ internal sealed partial class McpGatewayRuntime
                 {
                     var storedEmbeddings = await embeddingStore.GetAsync(
                         storeCandidates.Select(static candidate => candidate.Lookup).ToList(),
-                        CancellationToken.None);
+                        cancellationToken);
 
                     foreach (var candidate in storeCandidates)
                     {
@@ -194,7 +223,7 @@ internal sealed partial class McpGatewayRuntime
                     {
                         var embeddings = (await embeddingGenerator.GenerateAsync(
                                 missingCandidates.Select(candidate => entries[candidate.Index].Document),
-                                cancellationToken: CancellationToken.None))
+                                cancellationToken: cancellationToken))
                             .ToList();
                         if (embeddings.Count == missingCandidates.Count)
                         {
@@ -219,7 +248,7 @@ internal sealed partial class McpGatewayRuntime
                             {
                                 try
                                 {
-                                    await embeddingStore.UpsertAsync(generatedEmbeddings, CancellationToken.None);
+                                    await embeddingStore.UpsertAsync(generatedEmbeddings, cancellationToken);
                                 }
                                 catch (Exception ex) when (ex is not OperationCanceledException)
                                 {
@@ -320,4 +349,19 @@ internal sealed partial class McpGatewayRuntime
             ? 1d
             : totalLength / fieldCount;
     }
+
+    private static async Task AwaitCanceledBuildAsync(BuildOperation buildOperation)
+    {
+        try
+        {
+            await buildOperation.Task;
+        }
+        catch (OperationCanceledException) when (buildOperation.CancellationToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    private sealed record BuildOperation(
+        Task<McpGatewayIndexBuildResult> Task,
+        CancellationToken CancellationToken);
 }

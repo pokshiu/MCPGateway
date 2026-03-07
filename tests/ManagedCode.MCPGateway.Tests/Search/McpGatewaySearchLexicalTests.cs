@@ -151,6 +151,27 @@ public sealed partial class McpGatewaySearchTests
     }
 
     [TUnit.Core.Test]
+    public async Task SearchAsync_IgnoresUnserializableContextPayloads()
+    {
+        await using var serviceProvider = GatewayTestServiceProviderFactory.Create(ConfigureSearchTools);
+        var gateway = serviceProvider.GetRequiredService<IMcpGateway>();
+        var cyclicContext = new CyclicContextPayload();
+        cyclicContext.Self = cyclicContext;
+
+        await gateway.BuildIndexAsync();
+        var searchResult = await gateway.SearchAsync(new McpGatewaySearchRequest(
+            Query: "weather forecast",
+            MaxResults: 1,
+            Context: new Dictionary<string, object?>
+            {
+                ["broken"] = cyclicContext
+            }));
+
+        await Assert.That(searchResult.RankingMode).IsEqualTo("lexical");
+        await Assert.That(searchResult.Matches[0].ToolId).IsEqualTo("local:weather_search_forecast");
+    }
+
+    [TUnit.Core.Test]
     public async Task SearchAsync_UsesBrowseModeWhenQueryAndContextAreMissing()
     {
         await using var serviceProvider = GatewayTestServiceProviderFactory.Create(ConfigureSearchTools);
@@ -228,5 +249,10 @@ public sealed partial class McpGatewaySearchTests
         options.SearchStrategy = McpGatewaySearchStrategy.Tokenizer;
         options.AddTool("local", TestFunctionFactory.CreateFunction(SearchGitHub, "github_pull_request_search", "Search GitHub pull requests by repository, reviewer queue, review approvals, branch, or merge status. Aliases: merge request, demande de fusion."));
         options.AddTool("local", TestFunctionFactory.CreateFunction(SearchGitHub, "github_code_search", "Search GitHub source code for files, symbols, snippets, or API usages inside repositories."));
+    }
+
+    private sealed class CyclicContextPayload
+    {
+        public CyclicContextPayload? Self { get; set; }
     }
 }

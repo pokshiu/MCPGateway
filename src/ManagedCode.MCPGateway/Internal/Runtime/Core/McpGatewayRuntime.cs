@@ -181,7 +181,7 @@ internal sealed partial class McpGatewayRuntime : IMcpGateway
     private readonly int _maxSearchResults;
     private readonly int _maxDescriptorLength;
     private RuntimeState _state = RuntimeState.Empty;
-    private Task<McpGatewayIndexBuildResult>? _buildTask;
+    private BuildOperation? _buildOperation;
 
     internal McpGatewayRuntime(
         IServiceProvider serviceProvider,

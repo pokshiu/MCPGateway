@@ -278,17 +278,65 @@ public sealed partial class McpGatewaySearchTests
         });
         var gateway = serviceProvider.GetRequiredService<IMcpGateway>();
 
-        var firstBuildTask = gateway.BuildIndexAsync();
-        var secondBuildTask = gateway.BuildIndexAsync();
+        var buildTasks = Enumerable.Range(0, 20)
+            .Select(_ => gateway.BuildIndexAsync())
+            .ToArray();
 
         await factoryStarted.Task;
         releaseFactory.TrySetResult(serverHost.Client);
 
-        var results = await Task.WhenAll(firstBuildTask, secondBuildTask);
+        var results = await Task.WhenAll(buildTasks);
 
         await Assert.That(attempts).IsEqualTo(1);
-        await Assert.That(results[0].ToolCount).IsEqualTo(3);
-        await Assert.That(results[1].ToolCount).IsEqualTo(3);
+        await Assert.That(results.All(static result => result.ToolCount == 3)).IsTrue();
+    }
+
+    [TUnit.Core.Test]
+    public async Task BuildIndexAsync_CancelsUnderlyingSourceLoadAndAllowsRetry()
+    {
+        await using var serverHost = await TestMcpServerHost.StartAsync();
+
+        var attempts = 0;
+        var factoryStarted = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var serviceProvider = GatewayTestServiceProviderFactory.Create(options =>
+        {
+            options.AddMcpClientFactory(
+                "test-mcp",
+                async cancellationToken =>
+                {
+                    var attempt = Interlocked.Increment(ref attempts);
+                    if (attempt == 1)
+                    {
+                        factoryStarted.TrySetResult(null);
+                        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                    }
+
+                    return serverHost.Client;
+                },
+                disposeClient: false);
+        });
+        var gateway = serviceProvider.GetRequiredService<IMcpGateway>();
+        using var cancellationSource = new CancellationTokenSource();
+
+        var firstBuildTask = gateway.BuildIndexAsync(cancellationSource.Token);
+        await factoryStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellationSource.Cancel();
+
+        OperationCanceledException? cancellationException = null;
+        try
+        {
+            await firstBuildTask.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        catch (OperationCanceledException ex)
+        {
+            cancellationException = ex;
+        }
+
+        var secondBuild = await gateway.BuildIndexAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        await Assert.That(cancellationException).IsNotNull();
+        await Assert.That(attempts).IsEqualTo(2);
+        await Assert.That(secondBuild.ToolCount).IsEqualTo(3);
     }
 
     [TUnit.Core.Test]

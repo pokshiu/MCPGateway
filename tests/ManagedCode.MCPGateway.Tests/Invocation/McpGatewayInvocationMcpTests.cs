@@ -68,6 +68,39 @@ public sealed partial class McpGatewayInvocationTests
     }
 
     [TUnit.Core.Test]
+    public async Task InvokeAsync_IgnoresUnserializableContextMeta()
+    {
+        await using var serverHost = await TestMcpServerHost.StartAsync();
+        await using var serviceProvider = GatewayTestServiceProviderFactory.Create(options =>
+        {
+            options.AddMcpClient("test-mcp", serverHost.Client, disposeClient: false);
+        });
+
+        var gateway = serviceProvider.GetRequiredService<IMcpGateway>();
+        var cyclicContext = new CyclicInvocationContext();
+        cyclicContext.Self = cyclicContext;
+
+        await gateway.BuildIndexAsync();
+        var invokeResult = await gateway.InvokeAsync(new McpGatewayInvokeRequest(
+            ToolId: "test-mcp:github_repository_search",
+            Query: "managedcode",
+            Context: new Dictionary<string, object?>
+            {
+                ["broken"] = cyclicContext
+            }));
+
+        await Assert.That(invokeResult.IsSuccess).IsTrue();
+        await Assert.That(serverHost.CapturedMeta.Count > 0).IsTrue();
+
+        var payload = serverHost.CapturedMeta[^1];
+        await Assert.That(payload.TryGetPropertyValue("managedCodeMcpGateway", out var gatewayNode)).IsTrue();
+
+        var gatewayMeta = gatewayNode!.AsObject();
+        await Assert.That(gatewayMeta["query"]!.GetValue<string>()).IsEqualTo("managedcode");
+        await Assert.That(gatewayMeta.ContainsKey("context")).IsFalse();
+    }
+
+    [TUnit.Core.Test]
     public async Task InvokeAsync_ParsesJsonTextContentFromMcpTool()
     {
         await using var serverHost = await TestMcpServerHost.StartAsync();
@@ -110,5 +143,10 @@ public sealed partial class McpGatewayInvocationTests
         await Assert.That(invokeResult.IsSuccess).IsTrue();
         await Assert.That(invokeResult.Output).IsTypeOf<string>();
         await Assert.That((string)invokeResult.Output!).IsEqualTo("plain:managedcode");
+    }
+
+    private sealed class CyclicInvocationContext
+    {
+        public CyclicInvocationContext? Self { get; set; }
     }
 }
