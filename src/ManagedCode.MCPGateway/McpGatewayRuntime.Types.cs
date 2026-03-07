@@ -4,7 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace ManagedCode.MCPGateway;
 
-public sealed partial class McpGateway
+internal sealed partial class McpGatewayRuntime
 {
     private sealed record InvocationResolution(bool IsSuccess, ToolCatalogEntry? Entry, string? Error)
     {

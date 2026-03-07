@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace ManagedCode.MCPGateway;
 
-public sealed partial class McpGateway
+internal sealed partial class McpGatewayRuntime
 {
     private EmbeddingGeneratorLease ResolveEmbeddingGenerator()
     {

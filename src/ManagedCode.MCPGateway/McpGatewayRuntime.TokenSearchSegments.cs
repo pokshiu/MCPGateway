@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace ManagedCode.MCPGateway;
 
-public sealed partial class McpGateway
+internal sealed partial class McpGatewayRuntime
 {
     private static IReadOnlyList<WeightedTextSegment> BuildDescriptorTokenSearchSegments(
         McpGatewayToolDescriptor descriptor)

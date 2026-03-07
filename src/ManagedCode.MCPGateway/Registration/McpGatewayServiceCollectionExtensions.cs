@@ -19,6 +19,7 @@ public static class McpGatewayServiceCollectionExtensions
         services.TryAddSingleton<McpGatewayRegistry>();
         services.TryAddSingleton<McpGateway>();
         services.TryAddSingleton<IMcpGateway>(serviceProvider => serviceProvider.GetRequiredService<McpGateway>());
+        services.TryAddSingleton<IMcpGatewayCatalogSource>(serviceProvider => serviceProvider.GetRequiredService<McpGatewayRegistry>());
         services.TryAddSingleton<IMcpGatewayRegistry>(serviceProvider => serviceProvider.GetRequiredService<McpGatewayRegistry>());
         services.TryAddSingleton<McpGatewayToolSet>();
 

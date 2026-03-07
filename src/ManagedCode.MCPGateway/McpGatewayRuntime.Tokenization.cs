@@ -2,7 +2,7 @@ using System.Text;
 
 namespace ManagedCode.MCPGateway;
 
-public sealed partial class McpGateway
+internal sealed partial class McpGatewayRuntime
 {
     private TokenSearchProfile BuildTokenSearchProfile(
         IEnumerable<WeightedTextSegment> segments,

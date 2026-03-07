@@ -5,7 +5,7 @@ using ModelContextProtocol.Client;
 
 namespace ManagedCode.MCPGateway;
 
-internal sealed class McpGatewayRegistry(IOptions<McpGatewayOptions> options) : IMcpGatewayRegistry, IAsyncDisposable
+internal sealed class McpGatewayRegistry(IOptions<McpGatewayOptions> options) : IMcpGatewayRegistry, IMcpGatewayCatalogSource, IAsyncDisposable
 {
     private readonly object _gate = new();
     private readonly McpGatewayRegistrationCollection _registrations = new(options.Value.SourceRegistrations);
@@ -54,12 +54,12 @@ internal sealed class McpGatewayRegistry(IOptions<McpGatewayOptions> options) : 
         string? displayName = null)
         => Mutate(registrations => registrations.AddMcpClientFactory(sourceId, clientFactory, disposeClient, displayName));
 
-    public McpGatewayRegistrySnapshot CreateSnapshot()
+    public McpGatewayCatalogSourceSnapshot CreateSnapshot()
     {
         lock (_gate)
         {
             ThrowIfDisposed();
-            return new McpGatewayRegistrySnapshot(_version, _registrations.Snapshot());
+            return new McpGatewayCatalogSourceSnapshot(_version, _registrations.Snapshot());
         }
     }
 

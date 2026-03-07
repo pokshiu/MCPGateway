@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 
 namespace ManagedCode.MCPGateway;
 
-public sealed partial class McpGateway
+internal sealed partial class McpGatewayRuntime
 {
     private static string BuildEffectiveSearchQuery(McpGatewaySearchRequest request)
     {

@@ -4,7 +4,7 @@ using ModelContextProtocol.Protocol;
 
 namespace ManagedCode.MCPGateway;
 
-public sealed partial class McpGateway
+internal sealed partial class McpGatewayRuntime
 {
     private static InvocationResolution ResolveInvocationTarget(
         ToolCatalogSnapshot snapshot,

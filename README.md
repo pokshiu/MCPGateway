@@ -77,6 +77,24 @@ var invoke = await gateway.InvokeAsync(new McpGatewayInvokeRequest(
 
 `AddManagedCodeMcpGateway(...)` does not create or configure an embedding generator for you. Vector ranking is enabled only when the same DI container also has an `IEmbeddingGenerator<string, Embedding<float>>`. The gateway first tries the keyed registration `McpGatewayServiceKeys.EmbeddingGenerator` and falls back to any regular registration. Otherwise it stays fully functional and uses lexical ranking.
 
+`McpGateway` is the runtime search/invoke facade. If you need to add tools or MCP sources after the container is built, resolve `IMcpGatewayRegistry` separately:
+
+```csharp
+var registry = serviceProvider.GetRequiredService<IMcpGatewayRegistry>();
+
+registry.AddTool(
+    "local",
+    AIFunctionFactory.Create(
+        static (string query) => $"weather:{query}",
+        new AIFunctionFactoryOptions
+        {
+            Name = "weather_search_forecast",
+            Description = "Search weather forecast and temperature information by city name."
+        }));
+
+await gateway.BuildIndexAsync();
+```
+
 ## Context-Aware Search And Invoke
 
 When the current turn has extra UI, workflow, or chat context, pass it through the request models:

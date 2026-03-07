@@ -111,17 +111,19 @@ public sealed partial class McpGatewaySearchTests
     }
 
     [TUnit.Core.Test]
-    public async Task McpGateway_PublicRegistryMethodsDelegateToSeparatedRegistry()
+    public async Task McpGateway_DoesNotExposeRegistryMutations()
     {
         await using var serviceProvider = GatewayTestServiceProviderFactory.Create(static _ => { });
         var gateway = serviceProvider.GetRequiredService<McpGateway>();
+        var registry = serviceProvider.GetRequiredService<IMcpGatewayRegistry>();
 
-        gateway.AddTool(
+        registry.AddTool(
             "local",
             TestFunctionFactory.CreateFunction(SearchWeather, "weather_search_forecast", "Search weather forecast and temperature information by city name."));
 
         var tools = await gateway.ListToolsAsync();
 
+        await Assert.That(typeof(IMcpGatewayRegistry).IsAssignableFrom(gateway.GetType())).IsFalse();
         await Assert.That(tools.Count).IsEqualTo(1);
         await Assert.That(tools.Single().ToolId).IsEqualTo("local:weather_search_forecast");
     }

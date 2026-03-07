@@ -104,7 +104,8 @@ If no new rule is detected -> do not update the file.
 - `src/ManagedCode.MCPGateway/Abstractions/` contains public interfaces.
 - `src/ManagedCode.MCPGateway/Models/` contains public contracts and internal source registrations.
 - `src/ManagedCode.MCPGateway/Registration/` contains DI registration extensions.
-- `src/ManagedCode.MCPGateway/McpGateway.cs` is the main runtime implementation.
+- `src/ManagedCode.MCPGateway/McpGateway.cs` is the public gateway facade.
+- `src/ManagedCode.MCPGateway/McpGatewayRuntime*.cs` contains the internal runtime orchestration implementation.
 - `src/ManagedCode.MCPGateway/McpGatewayToolSet.cs` exposes the gateway as reusable `AITool` meta-tools.
 - `.codex/skills/` contains repo-local MCAF skills for Codex.
 
@@ -157,6 +158,7 @@ If no new rule is detected -> do not update the file.
 - Prefer simple, readable C# over clever abstractions.
 - Prefer serializer-first JSON/schema handling; avoid ad-hoc manual special cases for `JsonElement`/`JsonNode`/schema objects when normal `System.Text.Json` serialization can represent them correctly.
 - Prefer explicit SOLID object decomposition over large `partial` types; when responsibilities like registry, indexing, invocation, or schema handling can live in dedicated classes, extract real collaborators instead of only splitting files.
+- Keep `McpGateway` focused on search/invoke orchestration only; do not embed registry or mutation responsibilities into the gateway type itself, because that mixes lifecycle/catalog mutation with runtime execution concerns.
 - Keep public API names aligned with package identity `ManagedCode.MCPGateway`.
 - Do not duplicate package metadata or version blocks inside project files unless a project-specific override is required.
 - Use constants for stable tool names and protocol-facing identifiers.

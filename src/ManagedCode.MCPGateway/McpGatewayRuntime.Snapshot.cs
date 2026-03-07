@@ -1,12 +1,12 @@
 namespace ManagedCode.MCPGateway;
 
-public sealed partial class McpGateway
+internal sealed partial class McpGatewayRuntime
 {
     private async Task<ToolCatalogSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
     {
         while (true)
         {
-            var registrySnapshot = _registry.CreateSnapshot();
+            var registrySnapshot = _catalogSource.CreateSnapshot();
             lock (_stateGate)
             {
                 if (_snapshotVersion == registrySnapshot.Version)

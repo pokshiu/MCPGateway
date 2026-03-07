@@ -5,7 +5,7 @@ using ModelContextProtocol.Client;
 
 namespace ManagedCode.MCPGateway;
 
-public sealed partial class McpGateway
+internal sealed partial class McpGatewayRuntime
 {
     private static McpGatewayToolDescriptor? BuildDescriptor(
         McpGatewayToolSourceRegistration registration,

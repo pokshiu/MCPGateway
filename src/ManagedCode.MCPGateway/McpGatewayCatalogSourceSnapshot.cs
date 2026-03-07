@@ -1,5 +1,5 @@
 namespace ManagedCode.MCPGateway;
 
-internal sealed record McpGatewayRegistrySnapshot(
+internal sealed record McpGatewayCatalogSourceSnapshot(
     int Version,
     IReadOnlyList<McpGatewayToolSourceRegistration> Registrations);

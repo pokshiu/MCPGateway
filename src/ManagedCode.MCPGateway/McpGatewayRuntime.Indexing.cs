@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 
 namespace ManagedCode.MCPGateway;
 
-public sealed partial class McpGateway
+internal sealed partial class McpGatewayRuntime
 {
     public async Task<McpGatewayIndexBuildResult> BuildIndexAsync(CancellationToken cancellationToken = default)
     {
@@ -13,7 +13,7 @@ public sealed partial class McpGateway
         {
             ThrowIfDisposed();
 
-            var registrySnapshot = _registry.CreateSnapshot();
+            var registrySnapshot = _catalogSource.CreateSnapshot();
             var diagnostics = new List<McpGatewayDiagnostic>();
             var entries = new List<ToolCatalogEntry>();
             var seenToolIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

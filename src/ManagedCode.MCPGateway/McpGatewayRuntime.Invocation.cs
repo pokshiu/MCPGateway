@@ -8,7 +8,7 @@ using ModelContextProtocol.Client;
 
 namespace ManagedCode.MCPGateway;
 
-public sealed partial class McpGateway
+internal sealed partial class McpGatewayRuntime
 {
     public async Task<McpGatewayInvokeResult> InvokeAsync(
         McpGatewayInvokeRequest request,
