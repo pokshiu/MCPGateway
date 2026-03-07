@@ -184,7 +184,7 @@ internal sealed partial class McpGatewayRuntime : IMcpGateway
         var catalogSource = serviceProvider.GetService<IMcpGatewayCatalogSource>();
         if (catalogSource is null)
         {
-            var ownedCatalogSource = new McpGatewayRegistry(options);
+            var ownedCatalogSource = new McpGatewayRegistry(new McpGatewayRegistryState(options));
             _catalogSource = ownedCatalogSource;
             _ownedCatalogSource = ownedCatalogSource;
         }

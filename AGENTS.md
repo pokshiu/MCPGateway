@@ -170,6 +170,7 @@ If no new rule is detected -> do not update the file.
 - Never leave stable string literals inline in runtime code; extract named constants for diagnostic codes, messages, modes, keys, and other durable identifiers so changes stay centralized.
 - Keep transport-specific logic inside the gateway and source registration abstractions, not scattered across the codebase.
 - Keep the package dependency surface small and justified.
+- Prefer direct generic DI registrations such as `services.TryAddSingleton<IService, Implementation>()` over lambda alias registrations when wiring package services, because the lambda style has already been called out as unreadable and error-prone in this repository.
 
 ### Critical (NEVER violate)
 

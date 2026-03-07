@@ -135,7 +135,7 @@ public sealed partial class McpGatewaySearchTests
     public async Task McpGateway_DoesNotExposeRegistryMutations()
     {
         await using var serviceProvider = GatewayTestServiceProviderFactory.Create(static _ => { });
-        var gateway = serviceProvider.GetRequiredService<McpGateway>();
+        var gateway = serviceProvider.GetRequiredService<IMcpGateway>();
         var registry = serviceProvider.GetRequiredService<IMcpGatewayRegistry>();
 
         registry.AddTool(
