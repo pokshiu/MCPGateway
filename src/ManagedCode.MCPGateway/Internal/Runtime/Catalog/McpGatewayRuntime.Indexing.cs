@@ -129,7 +129,7 @@ internal sealed partial class McpGatewayRuntime
                 entries.Add(new ToolCatalogEntry(
                     descriptor,
                     tool,
-                    BuildDescriptorDocument(descriptor, tool),
+                    BuildDescriptorDocument(descriptor),
                     searchFields,
                     BuildLexicalTerms(tokenSearchSegments),
                     TokenSearchProfile.Empty,

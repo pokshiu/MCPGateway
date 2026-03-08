@@ -1,8 +1,7 @@
+using System.Text.Json;
 using ManagedCode.MCPGateway.Abstractions;
-
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
-using System.Text.Json;
 
 namespace ManagedCode.MCPGateway.Tests;
 

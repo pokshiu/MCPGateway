@@ -38,7 +38,7 @@ internal sealed partial class McpGatewayRuntime
             InputSchemaJson: inputSchema.Json);
     }
 
-    private string BuildDescriptorDocument(McpGatewayToolDescriptor descriptor, AITool tool)
+    private string BuildDescriptorDocument(McpGatewayToolDescriptor descriptor)
     {
         var builder = new StringBuilder();
         builder.Append(ToolNameLabel);

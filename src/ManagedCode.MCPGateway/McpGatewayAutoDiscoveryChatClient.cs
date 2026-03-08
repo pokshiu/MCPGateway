@@ -72,17 +72,22 @@ public sealed class McpGatewayAutoDiscoveryChatClient : IChatClient
     {
         FunctionInvokingChatClient? functionInvokingChatClient = null;
 
+        void UpdateAdditionalTools(IReadOnlyList<AITool> gatewayTools)
+        {
+            var invokingChatClient = functionInvokingChatClient;
+            if (invokingChatClient is null)
+            {
+                return;
+            }
+
+            invokingChatClient.AdditionalTools = gatewayTools.ToList();
+        }
+
         var requestClient = new AutoDiscoveryRequestChatClient(
             _innerClient,
             _toolSet,
             _options,
-            gatewayTools =>
-            {
-                if (functionInvokingChatClient is not null)
-                {
-                    functionInvokingChatClient.AdditionalTools = gatewayTools.ToList();
-                }
-            });
+            UpdateAdditionalTools);
 
         functionInvokingChatClient = new FunctionInvokingChatClient(
             requestClient,
