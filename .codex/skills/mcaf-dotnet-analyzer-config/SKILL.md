@@ -12,6 +12,12 @@ compatibility: "Requires a .NET SDK-based repository; respects the repo's `AGENT
 - analyzer severity and style ownership are unclear
 - the team wants one source of truth for rule configuration
 
+## Value
+
+- produce a concrete project delta: code, docs, config, tests, CI, or review artifact
+- reduce ambiguity through explicit planning, verification, and final validation skills
+- leave reusable project context so future tasks are faster and safer
+
 ## Do Not Use For
 
 - choosing analyzers with no config change
@@ -22,6 +28,12 @@ compatibility: "Requires a .NET SDK-based repository; respects the repo's `AGENT
 - the nearest `AGENTS.md`
 - current `.editorconfig`
 - any `Directory.Build.props` overrides
+
+## Quick Start
+
+1. Read the nearest `AGENTS.md` and confirm scope and constraints.
+2. Run this skill's `Workflow` through the `Ralph Loop` until outcomes are acceptable.
+3. Return the `Required Result Format` with concrete artifacts and verification evidence.
 
 ## Workflow
 
@@ -36,6 +48,19 @@ compatibility: "Requires a .NET SDK-based repository; respects the repo's `AGENT
 5. Keep bulk switches such as `EnableNETAnalyzers` in MSBuild files, not in `.editorconfig`.
 6. Treat `.globalconfig` as an exceptional case, not the normal repo setup.
 
+## Bootstrap When Missing
+
+If analyzer configuration is requested but not structured yet:
+
+1. Detect current state:
+   - `rg --files -g '.editorconfig' -g '.globalconfig'`
+   - `rg -n "EnableNETAnalyzers|AnalysisLevel|AnalysisMode" -g '*.csproj' -g 'Directory.Build.*' .`
+2. Create or normalize one repo-root `.editorconfig` with `root = true`.
+3. Move rule severity into `.editorconfig` and keep bulk analyzer switches in project or MSBuild config.
+4. Add nested `.editorconfig` files only when a subtree really needs different scoped policy.
+5. Run `dotnet build SOLUTION_OR_PROJECT` and return `status: configured` or `status: improved`.
+6. If the repo intentionally uses another documented analyzer-config ownership model, return `status: not_applicable`.
+
 ## Deliver
 
 - one explicit analyzer configuration ownership model
@@ -46,6 +71,33 @@ compatibility: "Requires a .NET SDK-based repository; respects the repo's `AGENT
 - rule severity is reproducible in local and CI builds
 - IDE-only settings do not silently override repo policy
 - the default path is a root `.editorconfig`, not a surprise alternative
+
+## Ralph Loop
+
+Use the Ralph Loop for every task, including docs, architecture, testing, and tooling work.
+
+1. Plan first (mandatory):
+   - analyze current state
+   - define target outcome, constraints, and risks
+   - write a detailed execution plan
+   - list final validation skills to run at the end, with order and reason
+2. Execute one planned step and produce a concrete delta.
+3. Review the result and capture findings with actionable next fixes.
+4. Apply fixes in small batches and rerun the relevant checks or review steps.
+5. Update the plan after each iteration.
+6. Repeat until outcomes are acceptable or only explicit exceptions remain.
+7. If a dependency is missing, bootstrap it or return `status: not_applicable` with explicit reason and fallback path.
+
+### Required Result Format
+
+- `status`: `complete` | `clean` | `improved` | `configured` | `not_applicable` | `blocked`
+- `plan`: concise plan and current iteration step
+- `actions_taken`: concrete changes made
+- `validation_skills`: final skills run, or skipped with reasons
+- `verification`: commands, checks, or review evidence summary
+- `remaining`: top unresolved items or `none`
+
+For setup-only requests with no execution, return `status: configured` and exact next commands.
 
 ## Load References
 

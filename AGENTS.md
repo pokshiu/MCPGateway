@@ -86,6 +86,7 @@ If no new rule is detected -> do not update the file.
 
 - Core .NET routing: `mcaf-dotnet`, `mcaf-dotnet-features`, `mcaf-testing`, `mcaf-dotnet-tunit`
 - Standardized .NET toolchain: `mcaf-dotnet-analyzer-config`, `mcaf-dotnet-code-analysis`, `mcaf-dotnet-format`, `mcaf-dotnet-roslynator`, `mcaf-dotnet-codeql`
+- Extended .NET catalog: `mcaf-dotnet-archunitnet`, `mcaf-dotnet-coverlet`, `mcaf-dotnet-csharpier`, `mcaf-dotnet-meziantou-analyzer`, `mcaf-dotnet-mstest`, `mcaf-dotnet-netarchtest`, `mcaf-dotnet-reportgenerator`, `mcaf-dotnet-semgrep`, `mcaf-dotnet-stryker`, `mcaf-dotnet-stylecop-analyzers`, `mcaf-dotnet-xunit`
 - Quality and maintainability: `mcaf-dotnet-quality-ci`, `mcaf-dotnet-complexity`, `mcaf-solid-maintainability`
 - Governance and docs: `mcaf-solution-governance`, `mcaf-architecture-overview`, `mcaf-adr-writing`, `mcaf-feature-spec`, `mcaf-ci-cd`
 - Delivery and review: `mcaf-agile-delivery`, `mcaf-code-review`, `mcaf-devex`, `mcaf-documentation`, `mcaf-human-review-planning`, `mcaf-source-control`
@@ -143,6 +144,7 @@ If no new rule is detected -> do not update the file.
 
 - Bootstrap or refresh MCAF skills from the canonical tutorial and raw GitHub skill folders; do not rely on a shell installer because MCAF `v1.2` is URL-first.
 - For MCAF skill refresh tasks, treat the current tutorial as the source of truth for which skill folders should exist locally; keep the baseline bundle from the tutorial and add tool-specific `.NET` skills only when this repository is actually standardized on them.
+- When the user explicitly asks for the full `.NET` MCAF catalog, install every available `mcaf-dotnet*` skill folder from upstream even if the tutorial baseline for a minimal setup is smaller.
 - Keep repo-local MCAF skills under `.codex/skills/`, not in ad-hoc folders.
 - Keep one workflow per skill folder with a required `SKILL.md`.
 - Keep skill metadata concise and fix the YAML `description` when a skill mis-triggers.

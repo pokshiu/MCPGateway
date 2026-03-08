@@ -1,6 +1,6 @@
 ---
 name: mcaf-feature-spec
-description: "Create or update a feature spec under `docs/Features/` with business rules, user flows, system behaviour, verification, and Definition of Done. Use before implementing non-trivial behaviour changes; use `references/feature-template.md` for scaffolding."
+description: "Create or update a feature spec under `docs/Features/` with business rules, user flows, system behaviour, verification, and Definition of Done. Use when the user asks for a feature spec, executable requirements, acceptance criteria, behaviour documentation, or a pre-implementation plan for non-trivial behaviour changes."
 compatibility: "Requires repository write access; produces Markdown docs with Mermaid diagrams and executable verification steps."
 ---
 
@@ -12,6 +12,12 @@ compatibility: "Requires repository write access; produces Markdown docs with Me
 - behaviour is under-specified and engineers are guessing
 - tests need a stable behavioural source of truth
 
+## Value
+
+- produce a concrete project delta: code, docs, config, tests, CI, or review artifact
+- reduce ambiguity through explicit planning, verification, and final validation skills
+- leave reusable project context so future tasks are faster and safer
+
 ## Do Not Use For
 
 - architecture decisions that need alternatives and trade-offs
@@ -22,6 +28,12 @@ compatibility: "Requires repository write access; produces Markdown docs with Me
 - `docs/Architecture/Overview.md`
 - the nearest `AGENTS.md`
 - current user flows, business rules, and acceptance expectations
+
+## Quick Start
+
+1. Read the nearest `AGENTS.md` and confirm scope and constraints.
+2. Run this skill's `Workflow` through the `Ralph Loop` until outcomes are acceptable.
+3. Return the `Required Result Format` with concrete artifacts and verification evidence.
 
 ## Workflow
 
@@ -39,7 +51,7 @@ compatibility: "Requires repository write access; produces Markdown docs with Me
 
 ## Deliver
 
-- `docs/Features/<feature>.md`
+- `docs/Features/feature-name.md`
 - a feature spec that engineers and agents can implement directly
 
 ## Validate
@@ -48,6 +60,33 @@ compatibility: "Requires repository write access; produces Markdown docs with Me
 - edge cases are captured where they matter
 - verification steps match the intended behaviour
 - the doc can drive implementation without hidden tribal knowledge
+
+## Ralph Loop
+
+Use the Ralph Loop for every task, including docs, architecture, testing, and tooling work.
+
+1. Plan first (mandatory):
+   - analyze current state
+   - define target outcome, constraints, and risks
+   - write a detailed execution plan
+   - list final validation skills to run at the end, with order and reason
+2. Execute one planned step and produce a concrete delta.
+3. Review the result and capture findings with actionable next fixes.
+4. Apply fixes in small batches and rerun the relevant checks or review steps.
+5. Update the plan after each iteration.
+6. Repeat until outcomes are acceptable or only explicit exceptions remain.
+7. If a dependency is missing, bootstrap it or return `status: not_applicable` with explicit reason and fallback path.
+
+### Required Result Format
+
+- `status`: `complete` | `clean` | `improved` | `configured` | `not_applicable` | `blocked`
+- `plan`: concise plan and current iteration step
+- `actions_taken`: concrete changes made
+- `validation_skills`: final skills run, or skipped with reasons
+- `verification`: commands, checks, or review evidence summary
+- `remaining`: top unresolved items or `none`
+
+For setup-only requests with no execution, return `status: configured` and exact next commands.
 
 ## Load References
 

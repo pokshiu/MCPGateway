@@ -12,6 +12,12 @@ compatibility: "Requires a .NET solution or project; may update `AGENTS.md`, CI 
 - choosing analyzers, coverage, mutation, or architecture-test tooling for a .NET repo
 - standardizing `.editorconfig`, `dotnet format`, and warning policy
 
+## Value
+
+- produce a concrete project delta: code, docs, config, tests, CI, or review artifact
+- reduce ambiguity through explicit planning, verification, and final validation skills
+- leave reusable project context so future tasks are faster and safer
+
 ## Do Not Use For
 
 - non-.NET repositories
@@ -24,6 +30,12 @@ compatibility: "Requires a .NET solution or project; may update `AGENTS.md`, CI 
 - the current repo-root `.editorconfig` and MSBuild props
 - the current CI workflow and package references
 - the active test runner model: VSTest or Microsoft.Testing.Platform
+
+## Quick Start
+
+1. Read the nearest `AGENTS.md` and confirm scope and constraints.
+2. Run this skill's `Workflow` through the `Ralph Loop` until outcomes are acceptable.
+3. Return the `Required Result Format` with concrete artifacts and verification evidence.
 
 ## Workflow
 
@@ -67,8 +79,21 @@ compatibility: "Requires a .NET solution or project; may update `AGENTS.md`, CI 
    - `mcaf-dotnet-analyzer-config`
    - analyzer-pack skills such as `mcaf-dotnet-stylecop-analyzers`, `mcaf-dotnet-roslynator`, and `mcaf-dotnet-meziantou-analyzer`
    - coverage/reporting skills such as `mcaf-dotnet-coverlet` and `mcaf-dotnet-reportgenerator`
-   - architecture/security skills such as `mcaf-dotnet-netarchtest`, `mcaf-dotnet-archunitnet`, `mcaf-dotnet-codeql`, and `mcaf-dotnet-semgrep`
+   - architecture/security skills such as `mcaf-dotnet-netarchtest`, `mcaf-dotnet-archunitnet`, and `mcaf-dotnet-codeql`
 8. Avoid overlapping tools with conflicting ownership. If you add an opinionated formatter, define whether it replaces or complements `dotnet format`.
+
+## Bootstrap When Missing
+
+If a quality gate is requested but not configured, use this activation path:
+
+1. Detect current state in `.csproj`, `Directory.Build.*`, `.editorconfig`, tool manifests, and CI workflow files.
+2. Choose exactly one owner command per gate category (format, analyze, test, coverage, architecture, security, mutation).
+3. Install the minimal required package or tool and commit checked-in config files.
+4. Wire the gate into both `AGENTS.md` and CI with explicit commands.
+5. Run a first verify pass, fix actionable failures, and rerun.
+6. Return `status: configured` if newly enabled and passing, or `status: improved` if issues remain but baseline improved.
+7. Return `status: not_applicable` only when the gate is explicitly out of scope for this repo.
+
 
 ## Deliver
 
@@ -86,6 +111,33 @@ compatibility: "Requires a .NET solution or project; may update `AGENTS.md`, CI 
 - complexity and architecture policy are explicit, not implied
 - .NET code changes are expected to pass more than tests alone when quality gates are configured
 - any licensing or hosting caveat is documented before the tool becomes a default gate
+
+## Ralph Loop
+
+Use the Ralph Loop for every task, including docs, architecture, testing, and tooling work.
+
+1. Plan first (mandatory):
+   - analyze current state
+   - define target outcome, constraints, and risks
+   - write a detailed execution plan
+   - list final validation skills to run at the end, with order and reason
+2. Execute one planned step and produce a concrete delta.
+3. Review the result and capture findings with actionable next fixes.
+4. Apply fixes in small batches and rerun the relevant checks or review steps.
+5. Update the plan after each iteration.
+6. Repeat until outcomes are acceptable or only explicit exceptions remain.
+7. If a dependency is missing, bootstrap it or return `status: not_applicable` with explicit reason and fallback path.
+
+### Required Result Format
+
+- `status`: `complete` | `clean` | `improved` | `configured` | `not_applicable` | `blocked`
+- `plan`: concise plan and current iteration step
+- `actions_taken`: concrete changes made
+- `validation_skills`: final skills run, or skipped with reasons
+- `verification`: commands, checks, or review evidence summary
+- `remaining`: top unresolved items or `none`
+
+For setup-only requests with no execution, return `status: configured` and exact next commands.
 
 ## Load References
 
