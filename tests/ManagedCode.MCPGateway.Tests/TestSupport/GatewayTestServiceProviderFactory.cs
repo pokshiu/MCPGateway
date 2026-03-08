@@ -1,7 +1,7 @@
+using ManagedCode.MCPGateway.Abstractions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using ManagedCode.MCPGateway.Abstractions;
 
 namespace ManagedCode.MCPGateway.Tests;
 
@@ -10,7 +10,8 @@ internal static class GatewayTestServiceProviderFactory
     public static ServiceProvider Create(
         Action<McpGatewayOptions> configure,
         IEmbeddingGenerator<string, Embedding<float>>? embeddingGenerator = null,
-        IMcpGatewayToolEmbeddingStore? embeddingStore = null)
+        IMcpGatewayToolEmbeddingStore? embeddingStore = null,
+        IChatClient? searchQueryChatClient = null)
     {
         var services = new ServiceCollection();
         services.AddLogging(static logging => logging.SetMinimumLevel(LogLevel.Debug));
@@ -23,6 +24,11 @@ internal static class GatewayTestServiceProviderFactory
         if (embeddingStore is not null)
         {
             services.AddSingleton(embeddingStore);
+        }
+
+        if (searchQueryChatClient is not null)
+        {
+            services.AddKeyedSingleton<IChatClient>(McpGatewayServiceKeys.SearchQueryChatClient, searchQueryChatClient);
         }
 
         services.AddManagedCodeMcpGateway(configure);

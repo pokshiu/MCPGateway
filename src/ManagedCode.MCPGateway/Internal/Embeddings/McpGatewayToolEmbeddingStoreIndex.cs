@@ -1,13 +1,12 @@
 using System.Collections.Concurrent;
-using ManagedCode.MCPGateway.Abstractions;
 
 namespace ManagedCode.MCPGateway;
 
-public sealed class McpGatewayInMemoryToolEmbeddingStore : IMcpGatewayToolEmbeddingStore
+internal sealed class McpGatewayToolEmbeddingStoreIndex
 {
     private readonly ConcurrentDictionary<StoreKey, McpGatewayToolEmbedding> _embeddings = new();
 
-    public Task<IReadOnlyList<McpGatewayToolEmbedding>> GetAsync(
+    public IReadOnlyList<McpGatewayToolEmbedding> Get(
         IReadOnlyList<McpGatewayToolEmbeddingLookup> lookups,
         CancellationToken cancellationToken = default)
     {
@@ -22,22 +21,38 @@ public sealed class McpGatewayInMemoryToolEmbeddingStore : IMcpGatewayToolEmbedd
             }
         }
 
-        return Task.FromResult<IReadOnlyList<McpGatewayToolEmbedding>>(results);
+        return results;
     }
 
-    public Task UpsertAsync(
+    public IReadOnlyList<McpGatewayToolEmbedding> Upsert(
         IReadOnlyList<McpGatewayToolEmbedding> embeddings,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        foreach (var embedding in embeddings)
+        var clones = embeddings
+            .Select(Clone)
+            .ToList();
+
+        foreach (var embedding in clones)
         {
-            var clone = Clone(embedding);
-            _embeddings[StoreKey.FromEmbedding(clone)] = clone;
+            _embeddings[StoreKey.FromEmbedding(embedding)] = embedding;
         }
 
-        return Task.CompletedTask;
+        return clones;
+    }
+
+    public void Remove(string toolId)
+    {
+        var normalizedToolId = NormalizeToolId(toolId);
+        var keys = _embeddings.Keys
+            .Where(key => string.Equals(key.NormalizedToolId, normalizedToolId, StringComparison.Ordinal))
+            .ToList();
+
+        foreach (var key in keys)
+        {
+            _embeddings.TryRemove(key, out _);
+        }
     }
 
     private bool TryGetEmbedding(
