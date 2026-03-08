@@ -132,7 +132,7 @@ public sealed partial class McpGatewaySearchTests
     }
 
     [TUnit.Core.Test]
-    public async Task AddManagedCodeMcpGateway_ResolvesRegistryAsSeparateService()
+    public async Task AddMcpGateway_ResolvesRegistryAsSeparateService()
     {
         await using var serviceProvider = GatewayTestServiceProviderFactory.Create(options =>
         {
@@ -146,7 +146,7 @@ public sealed partial class McpGatewaySearchTests
     }
 
     [TUnit.Core.Test]
-    public async Task AddManagedCodeMcpGateway_RegistryAlsoActsAsCatalogSource()
+    public async Task AddMcpGateway_RegistryAlsoActsAsCatalogSource()
     {
         await using var serviceProvider = GatewayTestServiceProviderFactory.Create(static _ => { });
         var registry = serviceProvider.GetRequiredService<IMcpGatewayRegistry>();
@@ -178,7 +178,7 @@ public sealed partial class McpGatewaySearchTests
         }
 
         await Assert.That(exception).IsNotNull();
-        await Assert.That(exception!.Message).Contains("AddManagedCodeMcpGateway");
+        await Assert.That(exception!.Message).Contains("AddMcpGateway");
     }
 
     [TUnit.Core.Test]

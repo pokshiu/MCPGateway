@@ -31,7 +31,7 @@ internal static class GatewayTestServiceProviderFactory
             services.AddKeyedSingleton<IChatClient>(McpGatewayServiceKeys.SearchQueryChatClient, searchQueryChatClient);
         }
 
-        services.AddManagedCodeMcpGateway(configure);
+        services.AddMcpGateway(configure);
         return services.BuildServiceProvider();
     }
 }

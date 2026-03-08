@@ -5,7 +5,7 @@ namespace ManagedCode.MCPGateway;
 
 public static class McpGatewayServiceProviderExtensions
 {
-    public static Task<McpGatewayIndexBuildResult> InitializeManagedCodeMcpGatewayAsync(
+    public static Task<McpGatewayIndexBuildResult> InitializeMcpGatewayAsync(
         this IServiceProvider serviceProvider,
         CancellationToken cancellationToken = default)
     {

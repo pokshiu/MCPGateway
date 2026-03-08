@@ -104,7 +104,7 @@ public sealed partial class McpGatewaySearchTests
         services.AddKeyedSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
             McpGatewayServiceKeys.EmbeddingGenerator,
             keyedEmbeddingGenerator);
-        services.AddManagedCodeMcpGateway(ConfigureSearchTools);
+        services.AddMcpGateway(ConfigureSearchTools);
 
         await using var serviceProvider = services.BuildServiceProvider();
         var gateway = serviceProvider.GetRequiredService<IMcpGateway>();
@@ -126,7 +126,7 @@ public sealed partial class McpGatewaySearchTests
         var services = new ServiceCollection();
         services.AddLogging(static logging => logging.SetMinimumLevel(LogLevel.Debug));
         services.AddScoped<IEmbeddingGenerator<string, Embedding<float>>>(_ => new ScopedTestEmbeddingGenerator(tracker));
-        services.AddManagedCodeMcpGateway(ConfigureSearchTools);
+        services.AddMcpGateway(ConfigureSearchTools);
 
         await using var serviceProvider = services.BuildServiceProvider(new ServiceProviderOptions
         {

@@ -9,11 +9,11 @@ namespace ManagedCode.MCPGateway.Tests;
 public sealed partial class McpGatewaySearchTests
 {
     [TUnit.Core.Test]
-    public async Task InitializeManagedCodeMcpGatewayAsync_BuildsIndexThroughServiceProviderExtension()
+    public async Task InitializeMcpGatewayAsync_BuildsIndexThroughServiceProviderExtension()
     {
         await using var serviceProvider = GatewayTestServiceProviderFactory.Create(ConfigureSearchTools);
 
-        var buildResult = await serviceProvider.InitializeManagedCodeMcpGatewayAsync();
+        var buildResult = await serviceProvider.InitializeMcpGatewayAsync();
         var gateway = serviceProvider.GetRequiredService<IMcpGateway>();
         var tools = await gateway.ListToolsAsync();
 
@@ -22,13 +22,13 @@ public sealed partial class McpGatewaySearchTests
     }
 
     [TUnit.Core.Test]
-    public async Task AddManagedCodeMcpGatewayIndexWarmup_StartsBackgroundIndexBuild()
+    public async Task AddMcpGatewayIndexWarmup_StartsBackgroundIndexBuild()
     {
         var probeGateway = new WarmupProbeGateway();
         var services = new ServiceCollection();
         services.AddLogging(static logging => logging.SetMinimumLevel(LogLevel.Debug));
         services.AddSingleton<IMcpGateway>(probeGateway);
-        services.AddManagedCodeMcpGatewayIndexWarmup();
+        services.AddMcpGatewayIndexWarmup();
 
         await using var serviceProvider = services.BuildServiceProvider();
         var hostedServices = serviceProvider.GetServices<IHostedService>().ToList();

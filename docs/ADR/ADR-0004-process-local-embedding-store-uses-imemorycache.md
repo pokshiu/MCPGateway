@@ -16,7 +16,7 @@ Durable or distributed embedding reuse will remain the responsibility of host-pr
 
 ```mermaid
 flowchart LR
-    Host["Host application"] --> DI["AddManagedCodeMcpGateway(...)"]
+    Host["Host application"] --> DI["AddMcpGateway(...)"]
     Host --> CacheRegistration["AddMcpGatewayInMemoryToolEmbeddingStore()"]
     CacheRegistration --> MemoryCache["IMemoryCache"]
     CacheRegistration --> Store["IMcpGatewayToolEmbeddingStore"]

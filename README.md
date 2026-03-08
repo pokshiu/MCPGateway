@@ -30,7 +30,7 @@ dotnet add package ManagedCode.MCPGateway
 
 ## Core Services
 
-After `services.AddManagedCodeMcpGateway(...)`, the container exposes:
+After `services.AddMcpGateway(...)`, the container exposes:
 
 - `IMcpGateway` for build, list, search, invoke, and meta-tool creation
 - `IMcpGatewayRegistry` for adding tools or MCP sources after the container is built
@@ -46,7 +46,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 var services = new ServiceCollection();
 
-services.AddManagedCodeMcpGateway(options =>
+services.AddMcpGateway(options =>
 {
     options.AddTool(
         "local",
@@ -86,7 +86,7 @@ Important defaults:
 Register local tools during startup:
 
 ```csharp
-services.AddManagedCodeMcpGateway(options =>
+services.AddMcpGateway(options =>
 {
     options.AddTool(
         "local",
@@ -136,7 +136,7 @@ Registry updates automatically invalidate the catalog. The next list, search, or
 Examples:
 
 ```csharp
-services.AddManagedCodeMcpGateway(options =>
+services.AddMcpGateway(options =>
 {
     options.AddHttpServer(
         sourceId: "docs",
@@ -357,13 +357,13 @@ Manual warmup:
 ```csharp
 await using var serviceProvider = services.BuildServiceProvider();
 
-var build = await serviceProvider.InitializeManagedCodeMcpGatewayAsync();
+var build = await serviceProvider.InitializeMcpGatewayAsync();
 ```
 
 Hosted warmup:
 
 ```csharp
-services.AddManagedCodeMcpGateway(options =>
+services.AddMcpGateway(options =>
 {
     options.AddTool(
         "local",
@@ -376,7 +376,7 @@ services.AddManagedCodeMcpGateway(options =>
             }));
 });
 
-services.AddManagedCodeMcpGatewayIndexWarmup();
+services.AddMcpGatewayIndexWarmup();
 ```
 
 ## Optional Embeddings
@@ -391,7 +391,7 @@ var services = new ServiceCollection();
 services.AddKeyedSingleton<IEmbeddingGenerator<string, Embedding<float>>, MyEmbeddingGenerator>(
     McpGatewayServiceKeys.EmbeddingGenerator);
 
-services.AddManagedCodeMcpGateway(options =>
+services.AddMcpGateway(options =>
 {
     options.AddTool(
         "local",
@@ -418,7 +418,7 @@ services.AddKeyedSingleton<IChatClient>(
     McpGatewayServiceKeys.SearchQueryChatClient,
     mySearchRewriteChatClient);
 
-services.AddManagedCodeMcpGateway(options =>
+services.AddMcpGateway(options =>
 {
     options.SearchStrategy = McpGatewaySearchStrategy.Auto;
     options.SearchQueryNormalization = McpGatewaySearchQueryNormalization.TranslateToEnglishWhenAvailable;
@@ -459,7 +459,7 @@ services.AddSingleton<IMcpGatewayToolEmbeddingStore, MyToolEmbeddingStore>();
 You can also force a mode:
 
 ```csharp
-services.AddManagedCodeMcpGateway(options =>
+services.AddMcpGateway(options =>
 {
     options.SearchStrategy = McpGatewaySearchStrategy.Tokenizer;
 });
@@ -468,7 +468,7 @@ services.AddManagedCodeMcpGateway(options =>
 Or:
 
 ```csharp
-services.AddManagedCodeMcpGateway(options =>
+services.AddMcpGateway(options =>
 {
     options.SearchStrategy = McpGatewaySearchStrategy.Embeddings;
 });

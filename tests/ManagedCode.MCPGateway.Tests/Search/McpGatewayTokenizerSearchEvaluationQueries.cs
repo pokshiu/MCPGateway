@@ -6,7 +6,7 @@ public sealed partial class McpGatewayTokenizerSearchEvaluationTests
     [
         new("developer review queue for managedcode repo", "github_pull_request_search"),
         new("latest changelog tag for repository", "github_release_notes_lookup"),
-        new("where is AddManagedCodeMcpGateway defined", "github_code_search"),
+        new("where is AddMcpGateway defined", "github_code_search"),
         new("rain this weekend in paris", "weather_forecast_lookup"),
         new("smoke and pollution level in warsaw", "weather_air_quality_lookup"),
         new("storm warning near berlin tonight", "weather_alert_search"),

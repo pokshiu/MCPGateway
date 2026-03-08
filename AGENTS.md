@@ -194,6 +194,7 @@ If no new rule is detected -> do not update the file.
 - For search-quality improvements, prefer mathematical or statistical ranking changes over hardcoded phrase lists or ad-hoc query text hacks, because the user explicitly wants tokenizer search to improve through general scoring behavior rather than manual exceptions.
 - Prefer framework-provided in-memory caching primitives such as `IMemoryCache` over custom process-local storage implementations when they cover the lifecycle and lookup needs, because self-rolled memory stores age poorly and make scaling/concurrency behavior harder to trust.
 - Never keep legacy compatibility shims, obsolete paths, or lingering documentation references to removed implementations when a replacement is accepted, because this repository should converge on the current design instead of carrying dead historical baggage.
+- Never leave `ManagedCode`-prefixed DI/setup extension method names such as `AddManagedCodeMcpGateway(...)` in the public API once concise `McpGateway` naming is available, because these branded leftovers make the package surface inconsistent and read like stale legacy.
 
 ### Critical (NEVER violate)
 
@@ -234,6 +235,7 @@ If no new rule is detected -> do not update the file.
 - Direct fixes over preserving legacy compatibility paths when cleanup or review-driven corrections are requested
 - Framework-provided caching primitives over self-rolled in-memory stores when the package only needs process-local cache semantics
 - Removing replaced code paths completely instead of keeping legacy mentions or compatibility leftovers
+- Concise `McpGateway` public registration/init API names without leftover `ManagedCode` branding
 
 ### Dislikes
 
@@ -243,3 +245,4 @@ If no new rule is detected -> do not update the file.
 - Shipping behavior without tests
 - Self-rolled in-memory storage when standard .NET caching abstractions already fit the scenario
 - Legacy/obsolete compatibility leftovers after a replacement is accepted
+- `ManagedCode`-prefixed public DI/setup API names that should have been cleaned up

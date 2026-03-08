@@ -20,11 +20,11 @@ The repository needs an explicit record for these boundaries so the public packa
 
 ```mermaid
 flowchart LR
-    Host["Host application"] --> DI["AddManagedCodeMcpGateway(...)"]
+    Host["Host application"] --> DI["AddMcpGateway(...)"]
     DI --> Gateway["IMcpGateway / McpGateway"]
     DI --> Registry["IMcpGatewayRegistry / McpGatewayRegistry"]
     DI --> ToolSet["McpGatewayToolSet"]
-    DI --> Warmup["AddManagedCodeMcpGatewayIndexWarmup()"]
+    DI --> Warmup["AddMcpGatewayIndexWarmup()"]
     Gateway --> Runtime["McpGatewayRuntime"]
     Registry --> Snapshot["Catalog snapshots"]
     Runtime --> Snapshot
@@ -78,7 +78,7 @@ Cons:
 Positive:
 
 - public DI wiring is explicit: `IMcpGateway` for runtime work, `IMcpGatewayRegistry` for catalog mutation, `McpGatewayToolSet` for meta-tools
-- hosts get lazy behavior by default and optional eager warmup through `InitializeManagedCodeMcpGatewayAsync()` or `AddManagedCodeMcpGatewayIndexWarmup()`
+- hosts get lazy behavior by default and optional eager warmup through `InitializeMcpGatewayAsync()` or `AddMcpGatewayIndexWarmup()`
 - cancellation now propagates into source loading, embedding generation, and embedding-store I/O during index builds
 - runtime rebuilds after registry mutations remain automatic without forcing every host into startup code
 
@@ -98,7 +98,7 @@ Mitigations:
 
 - `IMcpGateway` MUST remain the public runtime facade for build, list, search, invoke, and meta-tool creation.
 - `IMcpGatewayRegistry` MUST remain the public mutation surface for adding tools and MCP sources after container build.
-- `AddManagedCodeMcpGateway(...)` MUST register `IMcpGateway`, `IMcpGatewayRegistry`, and `McpGatewayToolSet`.
+- `AddMcpGateway(...)` MUST register `IMcpGateway`, `IMcpGatewayRegistry`, and `McpGatewayToolSet`.
 - Index builds MUST be lazy by default and MUST rebuild automatically after registry mutations invalidate the snapshot.
 - Hosted warmup MUST stay optional and MUST use the same runtime/index path as normal gateway operations.
 - Cancellation of `BuildIndexAsync(...)` MUST propagate into underlying source loading and embedding work.

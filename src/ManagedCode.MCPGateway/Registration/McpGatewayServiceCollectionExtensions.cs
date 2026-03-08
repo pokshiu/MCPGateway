@@ -8,7 +8,7 @@ namespace ManagedCode.MCPGateway;
 
 public static class McpGatewayServiceCollectionExtensions
 {
-    public static IServiceCollection AddManagedCodeMcpGateway(
+    public static IServiceCollection AddMcpGateway(
         this IServiceCollection services,
         Action<McpGatewayOptions>? configure = null)
     {
@@ -36,7 +36,7 @@ public static class McpGatewayServiceCollectionExtensions
         return services;
     }
 
-    public static IServiceCollection AddManagedCodeMcpGatewayIndexWarmup(this IServiceCollection services)
+    public static IServiceCollection AddMcpGatewayIndexWarmup(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
 
