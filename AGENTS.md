@@ -7,6 +7,21 @@ Follows [MCAF](https://mcaf.managed-code.com/)
 
 ---
 
+## Purpose
+
+This file defines how AI agents work in this solution.
+
+- Root `AGENTS.md` holds the global workflow, shared commands, cross-cutting rules, and global skill routing.
+- The solution keeps project-local `AGENTS.md` files for the package and test projects so work can stay scoped.
+- Local `AGENTS.md` files refine entry points, boundaries, commands, and risks for their subtree without weakening root policy.
+
+## Solution Topology
+
+- Solution root: `.`
+- Projects or modules with local `AGENTS.md` files:
+  - `src/ManagedCode.MCPGateway/`
+  - `tests/ManagedCode.MCPGateway.Tests/`
+
 ## Conversations (Self-Learning)
 
 Learn the user's habits, preferences, and working style. Extract rules from conversations, save to "## Rules to follow", and generate code according to the user's personal rules.
@@ -73,6 +88,8 @@ If no new rule is detected -> do not update the file.
 - test-trx: `dotnet test --solution ManagedCode.MCPGateway.slnx -c Release --no-build --report-trx --results-directory ./artifacts/test-results`
 - test-runner-help: `tests/ManagedCode.MCPGateway.Tests/bin/Release/net10.0/ManagedCode.MCPGateway.Tests --help`
 - format: `dotnet format ManagedCode.MCPGateway.slnx`
+- format-check: `dotnet format ManagedCode.MCPGateway.slnx --verify-no-changes`
+- coverage: `dotnet test --solution ManagedCode.MCPGateway.slnx -c Release --no-build --coverage --coverage-output-format cobertura --results-directory ./artifacts/coverage`
 
 ### Rule Precedence
 
@@ -82,8 +99,15 @@ If no new rule is detected -> do not update the file.
 - If a local rule appears weaker than the root policy, stop and clarify it before editing code.
 - Record justified exceptions in the nearest durable doc such as a local `AGENTS.md`, ADR, or feature doc.
 
+### Project AGENTS Policy
+
+- Keep one root `AGENTS.md` plus one local `AGENTS.md` in each project or module root that needs tighter scope.
+- Each local `AGENTS.md` must document project purpose, entry points, boundaries, project-local commands, applicable skills, and protected or high-risk areas.
+- If a project grows enough that the root file becomes vague for that subtree, tighten or add the local `AGENTS.md` before continuing implementation.
+
 ### Global Skills
 
+- Keep the standardized workflow skills first; use the extra installed inventory only when the repository actually wires that tool into commands, CI, docs, or an explicit user request.
 - Core .NET routing: `mcaf-dotnet`, `mcaf-dotnet-features`, `mcaf-testing`, `mcaf-dotnet-tunit`
 - Standardized .NET toolchain: `mcaf-dotnet-analyzer-config`, `mcaf-dotnet-code-analysis`, `mcaf-dotnet-format`, `mcaf-dotnet-roslynator`, `mcaf-dotnet-codeql`
 - Extended .NET catalog: `mcaf-dotnet-archunitnet`, `mcaf-dotnet-coverlet`, `mcaf-dotnet-csharpier`, `mcaf-dotnet-meziantou-analyzer`, `mcaf-dotnet-mstest`, `mcaf-dotnet-netarchtest`, `mcaf-dotnet-reportgenerator`, `mcaf-dotnet-semgrep`, `mcaf-dotnet-stryker`, `mcaf-dotnet-stylecop-analyzers`, `mcaf-dotnet-xunit`
@@ -104,6 +128,8 @@ If no new rule is detected -> do not update the file.
 
 ### Task Delivery (ALL TASKS)
 
+- Start from `docs/Architecture/Overview.md` and the nearest project-local `AGENTS.md` for every non-trivial task.
+- Treat `docs/Architecture/Overview.md` as the architecture map for this solution; if it becomes stale for the changed area, update it in the same task.
 - Always keep package and project identity as `ManagedCode.MCPGateway`.
 - Always use `Microsoft.Extensions.AI` and the official `ModelContextProtocol` .NET SDK as the integration foundation.
 - Never introduce Microsoft Agentic Framework into this repository unless the user explicitly re-opens that requirement.
@@ -145,6 +171,7 @@ If no new rule is detected -> do not update the file.
 - Bootstrap or refresh MCAF skills from the canonical tutorial and raw GitHub skill folders; do not rely on a shell installer because MCAF `v1.2` is URL-first.
 - For MCAF skill refresh tasks, treat the current tutorial as the source of truth for which skill folders should exist locally; keep the baseline bundle from the tutorial and add tool-specific `.NET` skills only when this repository is actually standardized on them.
 - When the user explicitly asks for the full `.NET` MCAF catalog, install every available `mcaf-dotnet*` skill folder from upstream even if the tutorial baseline for a minimal setup is smaller.
+- When the user explicitly confirms that the required skill folders are already present, do not re-add, prune, or resync the skill inventory again unless they ask for another inventory change, because governance sync and skill inventory sync are separate tasks in this repository.
 - Keep repo-local MCAF skills under `.codex/skills/`, not in ad-hoc folders.
 - Keep one workflow per skill folder with a required `SKILL.md`.
 - Keep skill metadata concise and fix the YAML `description` when a skill mis-triggers.
