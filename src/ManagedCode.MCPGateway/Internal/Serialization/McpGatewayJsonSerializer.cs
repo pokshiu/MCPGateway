@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 
 namespace ManagedCode.MCPGateway;
 
@@ -54,7 +55,11 @@ internal static class McpGatewayJsonSerializer
     }
 
     private static JsonSerializerOptions CreateOptions()
-        => new(JsonSerializerDefaults.Web);
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        options.Converters.Add(new JsonStringEnumConverter());
+        return options;
+    }
 
     private static JsonElement? NormalizeElement(JsonElement element)
         => element.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined

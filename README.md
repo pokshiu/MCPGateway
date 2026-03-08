@@ -8,11 +8,10 @@
 
 `ManagedCode.MCPGateway` is a .NET 10 library that turns local `AITool` instances and remote MCP servers into one searchable execution surface.
 
-The package is built on:
+It is built on:
 
 - `Microsoft.Extensions.AI`
 - the official `ModelContextProtocol` .NET SDK
-- in-memory descriptor indexing with vector ranking and built-in tokenizer-backed fallback
 
 ## Install
 
@@ -20,29 +19,22 @@ The package is built on:
 dotnet add package ManagedCode.MCPGateway
 ```
 
-## Architecture And Decision Records
+## What It Gives You
 
-- [Architecture overview](docs/Architecture/Overview.md)
-- [ADR-0001: Runtime boundaries and index lifecycle](docs/ADR/ADR-0001-runtime-boundaries-and-index-lifecycle.md)
-- [ADR-0002: Search ranking and query normalization](docs/ADR/ADR-0002-search-ranking-and-query-normalization.md)
-- [Feature spec: Search query normalization and ranking](docs/Features/SearchQueryNormalizationAndRanking.md)
+- one gateway for local `AITool` instances and MCP tools
+- one search surface with vector ranking when embeddings are available and lexical fallback when they are not
+- one invoke surface for both local tools and MCP tools
+- runtime registration through `IMcpGatewayRegistry`
+- reusable gateway meta-tools for chat clients and agents
+- staged tool auto-discovery for chat loops, so models do not need to see the whole catalog at once
 
-## What You Get
+## Core Services
 
-- one registry for local tools, stdio MCP servers, HTTP MCP servers, existing `McpClient` instances, or deferred `McpClient` factories
-- a DI-native split between `IMcpGateway` for runtime search/invoke and `IMcpGatewayRegistry` for catalog mutation
-- descriptor indexing that enriches search with tool name, description, required arguments, and input schema
-- lazy index build on the first catalog/search/invoke operation, plus optional eager warmup hooks for startup scenarios
-- configurable search strategy with embeddings or tokenizer-backed heuristic ranking
-- `SearchStrategy.Auto` by default: use embeddings when available, otherwise fall back to tokenizer-backed ranking automatically
-- built-in `ChatGptO200kBase` tokenizer path for tokenizer search and tokenizer fallback
-- optional English query normalization before ranking when a keyed search rewrite `IChatClient` is registered
-- top 5 matches by default when `maxResults` is not specified
-- vector search when an `IEmbeddingGenerator<string, Embedding<float>>` is registered
-- optional persisted tool embeddings through `IMcpGatewayToolEmbeddingStore`
-- token-aware lexical fallback when embeddings are unavailable or vector search cannot complete
-- one invoke surface for both local `AIFunction` tools and MCP tools
-- optional meta-tools you can hand back to another model as normal `AITool` instances
+After `services.AddManagedCodeMcpGateway(...)`, the container exposes:
+
+- `IMcpGateway` for build, list, search, invoke, and meta-tool creation
+- `IMcpGatewayRegistry` for adding tools or MCP sources after the container is built
+- `McpGatewayToolSet` for reusable `AITool` integration helpers
 
 ## Quickstart
 
@@ -76,50 +68,88 @@ await using var serviceProvider = services.BuildServiceProvider();
 var gateway = serviceProvider.GetRequiredService<IMcpGateway>();
 
 var search = await gateway.SearchAsync("find github repositories");
-var selectedTool = search.Matches[0];
-
 var invoke = await gateway.InvokeAsync(new McpGatewayInvokeRequest(
-    ToolId: selectedTool.ToolId,
+    ToolId: search.Matches[0].ToolId,
     Query: "managedcode"));
 ```
 
-`AddManagedCodeMcpGateway(...)` does not create or configure an embedding generator for you. Vector ranking is enabled only when the same DI container also has an `IEmbeddingGenerator<string, Embedding<float>>`. The gateway first tries the keyed registration `McpGatewayServiceKeys.EmbeddingGenerator` and falls back to any regular registration. Otherwise it stays fully functional and uses lexical ranking.
+Important defaults:
 
-The gateway builds its catalog lazily on the first `ListToolsAsync(...)`, `SearchAsync(...)`, or `InvokeAsync(...)` call. If you add more tools later through the registry, the next catalog/search/invoke operation rebuilds the index automatically. You only need an explicit warmup call when you want eager startup validation or a pre-warmed cache.
+- search is `Auto` by default
+- `Auto` uses embeddings when available and lexical fallback otherwise
+- the default result size is `5`
+- the maximum result size is `15`
+- the index is built lazily on first list, search, or invoke
 
-`McpGateway` is the runtime search/invoke facade. If you need to add tools or MCP sources after the container is built, resolve `IMcpGatewayRegistry` separately:
+## Basic Registration
+
+Register local tools during startup:
 
 ```csharp
+services.AddManagedCodeMcpGateway(options =>
+{
+    options.AddTool(
+        "local",
+        AIFunctionFactory.Create(
+            static (string query) => $"weather:{query}",
+            new AIFunctionFactoryOptions
+            {
+                Name = "weather_search_forecast",
+                Description = "Search weather forecast and temperature information by city name."
+            }));
+});
+```
+
+If you need to add tools later, use `IMcpGatewayRegistry`:
+
+```csharp
+await using var serviceProvider = services.BuildServiceProvider();
+
 var registry = serviceProvider.GetRequiredService<IMcpGatewayRegistry>();
+var gateway = serviceProvider.GetRequiredService<IMcpGateway>();
 
 registry.AddTool(
-    "local",
+    "runtime",
     AIFunctionFactory.Create(
-        static (string query) => $"weather:{query}",
+        static (string query) => $"status:{query}",
         new AIFunctionFactoryOptions
         {
-            Name = "weather_search_forecast",
-            Description = "Search weather forecast and temperature information by city name."
+            Name = "project_status_lookup",
+            Description = "Look up project status by identifier or short title."
         }));
 
 var tools = await gateway.ListToolsAsync();
 ```
 
-`AddManagedCodeMcpGateway(...)` registers `IMcpGateway`, `IMcpGatewayRegistry`, and `McpGatewayToolSet`. Add `AddManagedCodeMcpGatewayIndexWarmup()` only when you want hosted eager initialization.
+Registry updates automatically invalidate the catalog. The next list, search, or invoke rebuilds the index.
 
-## Public Surfaces
+## Register MCP Sources
 
-Resolve these services depending on what the host needs:
+`ManagedCode.MCPGateway` supports:
 
-- `IMcpGateway`: build, list, search, invoke, and create meta-tools
-- `IMcpGatewayRegistry`: add local tools or MCP sources after the container is built
-- `McpGatewayToolSet`: expose the gateway itself as reusable `AITool` instances
+- local `AITool` / `AIFunction`
+- HTTP MCP servers
+- stdio MCP servers
+- existing `McpClient` instances
+- deferred `McpClient` factories
 
-Those three services deliberately separate runtime execution, catalog mutation, and meta-tool creation instead of collapsing everything into one mutable gateway type.
+Examples:
 
-## Register Existing Or Deferred MCP Clients
+```csharp
+services.AddManagedCodeMcpGateway(options =>
+{
+    options.AddHttpServer(
+        sourceId: "docs",
+        endpoint: new Uri("https://example.com/mcp"));
 
-`IMcpGatewayRegistry` supports both immediate `McpClient` instances and deferred client factories:
+    options.AddStdioServer(
+        sourceId: "filesystem",
+        command: "npx",
+        arguments: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]);
+});
+```
+
+Or through the runtime registry:
 
 ```csharp
 var registry = serviceProvider.GetRequiredService<IMcpGatewayRegistry>();
@@ -132,25 +162,26 @@ registry.AddMcpClient(
 registry.AddMcpClientFactory(
     sourceId: "work-items",
     clientFactory: static async cancellationToken =>
-    {
-        return await CreateWorkItemClientAsync(cancellationToken);
-    });
+        await CreateWorkItemClientAsync(cancellationToken));
 ```
 
-Use `AddMcpClient(...)` when another part of the host already owns the client lifetime. Use `AddMcpClientFactory(...)` when the gateway should lazily create and cache the client through its normal source-loading path.
+## Search And Invoke
 
-## Invoke By Tool Id Or Stable Identity
+The normal flow is:
 
-The common flow is search first, then invoke by `ToolId`:
+1. search
+2. choose a match
+3. invoke by `ToolId`
 
 ```csharp
 var search = await gateway.SearchAsync("find github repositories");
+
 var invoke = await gateway.InvokeAsync(new McpGatewayInvokeRequest(
     ToolId: search.Matches[0].ToolId,
     Query: "managedcode"));
 ```
 
-If the host already knows the stable tool name, invocation can target `ToolName` and optionally `SourceId` instead:
+If the host already knows the stable tool name, invocation can target `ToolName` and `SourceId` instead:
 
 ```csharp
 var invoke = await gateway.InvokeAsync(new McpGatewayInvokeRequest(
@@ -159,116 +190,11 @@ var invoke = await gateway.InvokeAsync(new McpGatewayInvokeRequest(
     Query: "managedcode"));
 ```
 
-Use `SourceId` when the same tool name may exist in more than one registered source.
-
-## Optional Eager Warmup
-
-If you want to warm the catalog immediately after building the container, use the service-provider extension:
-
-```csharp
-await using var serviceProvider = services.BuildServiceProvider();
-
-var build = await serviceProvider.InitializeManagedCodeMcpGatewayAsync();
-```
-
-`InitializeManagedCodeMcpGatewayAsync()` returns `McpGatewayIndexBuildResult`, so startup code can inspect diagnostics or fail fast explicitly.
-
-For hosted applications, register background warmup once and let the host trigger it on startup:
-
-```csharp
-var services = new ServiceCollection();
-
-services.AddManagedCodeMcpGateway(options =>
-{
-    options.AddTool(
-        "local",
-        AIFunctionFactory.Create(
-            static (string query) => $"github:{query}",
-            new AIFunctionFactoryOptions
-            {
-                Name = "github_search_repositories",
-                Description = "Search GitHub repositories by user query."
-            }));
-});
-
-services.AddManagedCodeMcpGatewayIndexWarmup();
-```
-
-Use eager warmup when you want fail-fast startup behavior, a warmed cache before the first request, or deterministic startup benchmarking. Otherwise the lazy default is enough.
-
-## Recommended Hosted Setup
-
-This example shows the full production-oriented integration shape in one place. Remove the optional registrations if your host does not need vector search, query normalization, or persistent embedding reuse.
-
-```csharp
-using ManagedCode.MCPGateway;
-using ManagedCode.MCPGateway.Abstractions;
-using Microsoft.Extensions.AI;
-using Microsoft.Extensions.DependencyInjection;
-
-var services = new ServiceCollection();
-
-services.AddKeyedSingleton<IEmbeddingGenerator<string, Embedding<float>>, MyEmbeddingGenerator>(
-    McpGatewayServiceKeys.EmbeddingGenerator);
-services.AddKeyedSingleton<IChatClient, MySearchRewriteChatClient>(
-    McpGatewayServiceKeys.SearchQueryChatClient);
-services.AddSingleton<IMcpGatewayToolEmbeddingStore, McpGatewayInMemoryToolEmbeddingStore>();
-
-services.AddManagedCodeMcpGateway(options =>
-{
-    options.SearchStrategy = McpGatewaySearchStrategy.Auto;
-    options.SearchQueryNormalization = McpGatewaySearchQueryNormalization.TranslateToEnglishWhenAvailable;
-
-    options.AddTool(
-        "local",
-        AIFunctionFactory.Create(
-            static (string query) => $"github:{query}",
-            new AIFunctionFactoryOptions
-            {
-                Name = "github_search_repositories",
-                Description = "Search GitHub repositories by user query."
-            }));
-
-    options.AddHttpServer(
-        sourceId: "docs",
-        endpoint: new Uri("https://example.com/mcp"));
-});
-
-services.AddManagedCodeMcpGatewayIndexWarmup();
-
-await using var serviceProvider = services.BuildServiceProvider();
-
-var gateway = serviceProvider.GetRequiredService<IMcpGateway>();
-var registry = serviceProvider.GetRequiredService<IMcpGatewayRegistry>();
-var metaTools = serviceProvider.GetRequiredService<McpGatewayToolSet>().CreateTools();
-
-registry.AddTool(
-    "runtime",
-    AIFunctionFactory.Create(
-        static (string query) => $"status:{query}",
-        new AIFunctionFactoryOptions
-        {
-            Name = "project_status_lookup",
-            Description = "Look up project status by identifier or short title."
-        }));
-
-var search = await gateway.SearchAsync(
-    new McpGatewaySearchRequest(
-        Query: "review qeue for managedcode prs",
-        ContextSummary: "User is looking at repository maintenance work"));
-```
-
-Notes:
-
-- `SearchStrategy.Auto` is the default and is usually the right production setting.
-- the embedding generator, search-query rewrite client, and embedding store are all optional DI integrations
-- hosted warmup is optional; if you omit it, the gateway builds its catalog lazily on first use
-- runtime registrations through `IMcpGatewayRegistry` invalidate the catalog automatically, so the next list/search/invoke call rebuilds the index
-- `McpGatewayToolSet` and `gateway.CreateMetaTools()` expose the same meta-tools in two integration styles
+Use `SourceId` when the same tool name can exist in more than one source.
 
 ## Context-Aware Search And Invoke
 
-When the current turn has extra UI, workflow, or chat context, pass it through the request models:
+You can pass UI or workflow context into search and invocation:
 
 ```csharp
 var search = await gateway.SearchAsync(new McpGatewaySearchRequest(
@@ -292,109 +218,198 @@ var invoke = await gateway.InvokeAsync(new McpGatewayInvokeRequest(
     }));
 ```
 
-The gateway uses this request context in two ways:
-
-- search combines the query, context summary, and context values into one effective search input for embeddings or lexical fallback
-- MCP invocation sends the request context in MCP `meta`
-- local `AIFunction` tools can receive auto-mapped `query`, `contextSummary`, and `context` arguments when those parameters are required
+This context is used for ranking, and MCP invocations also receive it through MCP `meta`.
 
 ## Meta-Tools
 
-You can expose the gateway itself as two reusable `AITool` instances:
+The gateway can expose itself as two reusable tools:
+
+- `gateway_tools_search`
+- `gateway_tool_invoke`
+
+From the gateway:
 
 ```csharp
 var tools = gateway.CreateMetaTools();
 ```
 
-Or resolve the reusable helper from DI:
+From DI:
 
 ```csharp
 var toolSet = serviceProvider.GetRequiredService<McpGatewayToolSet>();
 var tools = toolSet.CreateTools();
 ```
 
-Custom stable tool names are supported:
+You can also attach those tools to existing chat options or tool lists:
 
 ```csharp
-var tools = gateway.CreateMetaTools(
-    searchToolName: "workspace_tool_search",
-    invokeToolName: "workspace_tool_invoke");
-```
+var toolSet = serviceProvider.GetRequiredService<McpGatewayToolSet>();
 
-By default this creates:
-
-- `gateway_tools_search`
-- `gateway_tool_invoke`
-
-These tools are useful when another model should first search the gateway catalog and then invoke the selected tool.
-
-## Search Behavior
-
-`ManagedCode.MCPGateway` builds one descriptor document per tool from:
-
-- tool name
-- display name
-- description
-- required arguments
-- input schema summaries
-
-Default search profile:
-
-- `SearchStrategy = McpGatewaySearchStrategy.Auto`
-- `SearchQueryNormalization = McpGatewaySearchQueryNormalization.TranslateToEnglishWhenAvailable`
-- `DefaultSearchLimit = 5`
-- `MaxSearchResults = 15`
-
-`McpGatewaySearchStrategy.Auto` means:
-
-- vector search when an embedding generator is registered
-- tokenizer-backed heuristic search when embeddings are unavailable
-- tokenizer-backed fallback when vector search cannot complete for a request
-
-The tokenizer-backed mode builds field-aware search documents from tool names, display names, descriptions, required arguments, and schema properties. Ranking then happens in two stages:
-
-- stage 1 retrieval with BM25-style field scoring, tokenizer-term cosine similarity, and character 3-gram similarity
-- stage 2 reranking over the candidate pool with calibrated coverage, lexical similarity, approximate typo matching, and tool-name evidence
-
-This keeps the search mathematical and tokenizer-driven instead of relying on hand-written query phrase exceptions. The tokenizer-backed path uses the built-in `ChatGptO200kBase` profile for the GPT-4o / ChatGPT tokenizer family.
-
-There is no public tokenizer-selection option. The package ships one built-in tokenizer-backed path and keeps the behavior configurable through search strategy, optional embeddings, and optional English query normalization.
-
-If an embedding generator is registered and vector search is active, the gateway vectorizes descriptor documents and uses cosine similarity plus lexical boosts. It first tries the keyed registration `McpGatewayServiceKeys.EmbeddingGenerator` and then falls back to any regular `IEmbeddingGenerator<string, Embedding<float>>`.
-
-The embedding generator is resolved per gateway operation, so singleton, scoped, and transient DI registrations all work with index builds and search.
-
-### Reading Search Diagnostics
-
-`McpGatewaySearchResult` exposes both the ranking mode and diagnostics for the chosen path:
-
-```csharp
-var result = await gateway.SearchAsync("review qeue for managedcode prs");
-
-Console.WriteLine(result.RankingMode);
-
-foreach (var diagnostic in result.Diagnostics)
+var options = new ChatOptions
 {
-    Console.WriteLine($"{diagnostic.Code}: {diagnostic.Message}");
-}
+    AllowMultipleToolCalls = false
+}.AddMcpGatewayTools(toolSet);
+
+var tools = toolSet.AddTools(existingTools);
 ```
 
-Common diagnostics:
+## Why Auto-Discovery
 
-- `query_normalized`
-- `lexical_fallback`
-- `vector_search_failed`
+Large tool catalogs should not be pushed directly into every model turn.
 
-## Optional English Query Normalization
+The recommended flow is:
 
-By default, the gateway may rewrite the incoming search query into concise English before ranking:
+1. expose only `gateway_tools_search` and `gateway_tool_invoke`
+2. let the model search the gateway catalog
+3. project only the latest matching tools as direct proxy tools
+4. replace that discovered set when a new search result arrives
 
-- it only happens when `options.SearchQueryNormalization` is enabled
-- it only uses a keyed `IChatClient` registered as `McpGatewayServiceKeys.SearchQueryChatClient`
-- if no keyed chat client is registered, search continues unchanged
-- if normalization fails, search continues with the original query and emits a diagnostic
+This keeps prompts smaller and tool choice cleaner while still using the full gateway catalog behind the scenes.
+
+## Recommended Chat Integration
+
+For normal chat loops, use the staged wrapper:
+
+```csharp
+using ManagedCode.MCPGateway;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
+
+await using var serviceProvider = services.BuildServiceProvider();
+
+var innerChatClient = serviceProvider.GetRequiredService<IChatClient>();
+using var chatClient = innerChatClient.UseManagedCodeMcpGatewayAutoDiscovery(
+    serviceProvider,
+    options =>
+    {
+        options.MaxDiscoveredTools = 2;
+    });
+
+var response = await chatClient.GetResponseAsync(
+    [new ChatMessage(ChatRole.User, "Find the github search tool and run it.")],
+    new ChatOptions
+    {
+        AllowMultipleToolCalls = false
+    });
+```
+
+What this does:
+
+- the first turn only exposes the two gateway meta-tools
+- after a search result, the latest matches are exposed as direct proxy tools
+- a later search replaces the previous discovered set
+
+If you already have a search result and want to materialize those proxy tools yourself, use:
+
+```csharp
+var toolSet = serviceProvider.GetRequiredService<McpGatewayToolSet>();
+var discoveredTools = toolSet.CreateDiscoveredTools(search.Matches, maxTools: 3);
+```
+
+## Recommended Agent Integration
+
+The same chat wrapper works with Microsoft Agent Framework hosts:
+
+```csharp
+using ManagedCode.MCPGateway;
+using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+
+await using var serviceProvider = services.BuildServiceProvider();
+
+var innerChatClient = serviceProvider.GetRequiredService<IChatClient>();
+var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
+using var chatClient = innerChatClient.UseManagedCodeMcpGatewayAutoDiscovery(
+    serviceProvider,
+    options =>
+    {
+        options.MaxDiscoveredTools = 2;
+    });
+
+var agent = new ChatClientAgent(
+    chatClient,
+    instructions: "Search the gateway catalog before invoking tools.",
+    name: "workspace-agent",
+    tools: [],
+    loggerFactory: loggerFactory,
+    services: serviceProvider);
+
+var response = await agent.RunAsync(
+    "Find the github search tool and run it.",
+    session: null,
+    options: new ChatClientAgentRunOptions(new ChatOptions
+    {
+        AllowMultipleToolCalls = false
+    }),
+    cancellationToken: default);
+```
+
+`ManagedCode.MCPGateway` itself stays generic. The Agent Framework dependency remains in the host project.
+
+## Optional Warmup
+
+The gateway works without explicit initialization, but you can warm the index eagerly when you want startup validation or a pre-built cache.
+
+Manual warmup:
+
+```csharp
+await using var serviceProvider = services.BuildServiceProvider();
+
+var build = await serviceProvider.InitializeManagedCodeMcpGatewayAsync();
+```
+
+Hosted warmup:
+
+```csharp
+services.AddManagedCodeMcpGateway(options =>
+{
+    options.AddTool(
+        "local",
+        AIFunctionFactory.Create(
+            static (string query) => $"github:{query}",
+            new AIFunctionFactoryOptions
+            {
+                Name = "github_search_repositories",
+                Description = "Search GitHub repositories by user query."
+            }));
+});
+
+services.AddManagedCodeMcpGatewayIndexWarmup();
+```
+
+## Optional Embeddings
+
+If the container has `IEmbeddingGenerator<string, Embedding<float>>`, the gateway can use vector ranking.
 
 Preferred registration:
+
+```csharp
+var services = new ServiceCollection();
+
+services.AddKeyedSingleton<IEmbeddingGenerator<string, Embedding<float>>, MyEmbeddingGenerator>(
+    McpGatewayServiceKeys.EmbeddingGenerator);
+
+services.AddManagedCodeMcpGateway(options =>
+{
+    options.AddTool(
+        "local",
+        AIFunctionFactory.Create(
+            static (string query) => $"github:{query}",
+            new AIFunctionFactoryOptions
+            {
+                Name = "github_search_repositories",
+                Description = "Search GitHub repositories by user query."
+            }));
+});
+```
+
+If no embedding generator is registered, the same gateway still works and falls back to lexical search automatically.
+
+## Optional Query Normalization
+
+If you want multilingual or noisy queries normalized before ranking, register a keyed `IChatClient`:
 
 ```csharp
 var services = new ServiceCollection();
@@ -407,310 +422,70 @@ services.AddManagedCodeMcpGateway(options =>
 {
     options.SearchStrategy = McpGatewaySearchStrategy.Auto;
     options.SearchQueryNormalization = McpGatewaySearchQueryNormalization.TranslateToEnglishWhenAvailable;
-
-    options.AddTool(
-        "local",
-        AIFunctionFactory.Create(
-            static (string query) => $"travel:{query}",
-            new AIFunctionFactoryOptions
-            {
-                Name = "travel_hotel_search",
-                Description = "Find hotels by city, district, amenities, breakfast, or cancellation policy."
-            }));
 });
 ```
 
-Disable normalization when the host wants purely local tokenizer behavior:
+If the keyed chat client is missing or normalization fails, search continues normally.
+
+## Optional Persistent Tool Embeddings
+
+For process-local caching, use the built-in in-memory store:
 
 ```csharp
-services.AddManagedCodeMcpGateway(options =>
-{
-    options.SearchStrategy = McpGatewaySearchStrategy.Tokenizer;
-    options.SearchQueryNormalization = McpGatewaySearchQueryNormalization.Disabled;
-});
-```
-
-The package does not register or configure an `IChatClient` for you. This keeps the gateway generic while still allowing multilingual and typo-heavy search inputs to converge to an English retrieval form when the host opts in.
-
-`McpGatewaySearchResult.RankingMode` stays:
-
-- `vector` for embedding-backed ranking
-- `lexical` for tokenizer-backed ranking and tokenizer fallback
-- `browse` when no search text/context is provided
-- `empty` when the catalog is empty
-
-In other words, the current `lexical` mode is the working tokenizer mode.
-
-## Search Strategy Matrix
-
-Use `McpGatewaySearchStrategy.Auto` when you want one production default that works everywhere:
-
-- if embeddings are registered, use embeddings
-- if embeddings are missing, use tokenizer ranking
-- if embeddings fail for a query, fall back to tokenizer ranking
-
-Use `McpGatewaySearchStrategy.Embeddings` when:
-
-- embeddings are expected in that host
-- you want vector search whenever it is available
-- tokenizer ranking should only be the fallback path when vector search cannot complete
-
-Use `McpGatewaySearchStrategy.Tokenizer` when:
-
-- you want a zero-embedding deployment
-- you want deterministic local search behavior without an embedding provider
-- you want to benchmark tokenizer-backed ranking independently from vector search
-
-## Search Strategy Configuration
-
-Force embeddings when they are available:
-
-```csharp
-var services = new ServiceCollection();
-
-services.AddKeyedSingleton<IEmbeddingGenerator<string, Embedding<float>>, MyEmbeddingGenerator>(
-    McpGatewayServiceKeys.EmbeddingGenerator);
-
-services.AddManagedCodeMcpGateway(options =>
-{
-    options.SearchStrategy = McpGatewaySearchStrategy.Embeddings;
-
-    options.AddTool(
-        "local",
-        AIFunctionFactory.Create(
-            static (string query) => $"github:{query}",
-            new AIFunctionFactoryOptions
-            {
-                Name = "github_search_repositories",
-                Description = "Search GitHub repositories by user query."
-            }));
-});
-```
-
-Force tokenizer-backed ranking:
-
-```csharp
-var services = new ServiceCollection();
-
-services.AddManagedCodeMcpGateway(options =>
-{
-    options.SearchStrategy = McpGatewaySearchStrategy.Tokenizer;
-
-    options.AddTool(
-        "local",
-        AIFunctionFactory.Create(
-            static (string query) => $"github:{query}",
-            new AIFunctionFactoryOptions
-            {
-                Name = "github_search_repositories",
-                Description = "Search GitHub repositories by user query."
-            }));
-});
-```
-
-Keep the default auto strategy, but make the defaults explicit in code:
-
-```csharp
-var services = new ServiceCollection();
-
-services.AddManagedCodeMcpGateway(options =>
-{
-    options.SearchStrategy = McpGatewaySearchStrategy.Auto;
-    options.DefaultSearchLimit = 5;
-    options.MaxSearchResults = 15;
-
-    options.AddTool(
-        "local",
-        AIFunctionFactory.Create(
-            static (string query) => $"github:{query}",
-            new AIFunctionFactoryOptions
-            {
-                Name = "github_search_repositories",
-                Description = "Search GitHub repositories by user query."
-            }));
-});
-```
-
-If you do not register an embedding generator, the same configuration still works and automatically uses tokenizer ranking.
-
-## Optional Embeddings
-
-Register any provider-specific implementation of `IEmbeddingGenerator<string, Embedding<float>>` in the same DI container before building the service provider.
-
-Preferred registration for the gateway:
-
-```csharp
-var services = new ServiceCollection();
-
-services.AddKeyedSingleton<IEmbeddingGenerator<string, Embedding<float>>, MyEmbeddingGenerator>(
-    McpGatewayServiceKeys.EmbeddingGenerator);
-
-services.AddManagedCodeMcpGateway(options =>
-{
-    options.AddTool(
-        "local",
-        AIFunctionFactory.Create(
-            static (string query) => $"github:{query}",
-            new AIFunctionFactoryOptions
-            {
-                Name = "github_search_repositories",
-                Description = "Search GitHub repositories by user query."
-            }));
-});
-```
-
-Fallback when your app already exposes a regular embedding generator:
-
-```csharp
-var services = new ServiceCollection();
-
-services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>, MyEmbeddingGenerator>();
-
-services.AddManagedCodeMcpGateway(options =>
-{
-    options.AddTool(
-        "local",
-        AIFunctionFactory.Create(
-            static (string query) => $"github:{query}",
-            new AIFunctionFactoryOptions
-            {
-                Name = "github_search_repositories",
-                Description = "Search GitHub repositories by user query."
-            }));
-});
-```
-
-The keyed registration is the preferred one, so you can dedicate a specific embedder to the gateway without affecting other app services.
-
-## Tokenizer Fallback Without Embeddings
-
-This is the default operational fallback:
-
-```csharp
-var services = new ServiceCollection();
-
-services.AddManagedCodeMcpGateway(options =>
-{
-    options.SearchStrategy = McpGatewaySearchStrategy.Auto;
-
-    options.AddTool(
-        "local",
-        AIFunctionFactory.Create(
-            static (string query) => $"github:{query}",
-            new AIFunctionFactoryOptions
-            {
-                Name = "github_search_repositories",
-                Description = "Search GitHub repositories by user query."
-            }));
-});
-
-await using var serviceProvider = services.BuildServiceProvider();
-var gateway = serviceProvider.GetRequiredService<IMcpGateway>();
-
-var result = await gateway.SearchAsync("review qeue for managedcode prs");
-```
-
-With no embedding generator registered:
-
-- the gateway still builds the catalog
-- search uses the built-in `ChatGptO200kBase` tokenizer path and two-stage lexical ranking
-- an optional keyed search rewrite `IChatClient` can normalize the query to English first
-- typo-tolerant term heuristics still participate in ranking
-- the result diagnostics contain `lexical_fallback`
-- the default result set size is 5
-
-If you want tokenizer search only, set `options.SearchStrategy = McpGatewaySearchStrategy.Tokenizer`.
-
-## Persistent Tool Embeddings
-
-For process-local caching, the package already includes `McpGatewayInMemoryToolEmbeddingStore`:
-
-```csharp
-var services = new ServiceCollection();
-
 services.AddKeyedSingleton<IEmbeddingGenerator<string, Embedding<float>>, MyEmbeddingGenerator>(
     McpGatewayServiceKeys.EmbeddingGenerator);
 services.AddSingleton<IMcpGatewayToolEmbeddingStore, McpGatewayInMemoryToolEmbeddingStore>();
-
-services.AddManagedCodeMcpGateway(options =>
-{
-    options.AddTool(
-        "local",
-        AIFunctionFactory.Create(
-            static (string query) => $"github:{query}",
-            new AIFunctionFactoryOptions
-            {
-                Name = "github_search_repositories",
-                Description = "Search GitHub repositories by user query."
-            }));
-});
 ```
 
-If you want to keep descriptor embeddings in a database or another persistent store, register your own `IMcpGatewayToolEmbeddingStore` implementation instead:
+For durable caching, register your own `IMcpGatewayToolEmbeddingStore` implementation:
 
 ```csharp
-var services = new ServiceCollection();
-
 services.AddKeyedSingleton<IEmbeddingGenerator<string, Embedding<float>>, MyEmbeddingGenerator>(
     McpGatewayServiceKeys.EmbeddingGenerator);
 services.AddSingleton<IMcpGatewayToolEmbeddingStore, MyToolEmbeddingStore>();
+```
 
+## Search Modes
+
+`McpGatewaySearchStrategy.Auto` is the default and usually the right choice:
+
+- use vector ranking when embeddings are available
+- fall back to lexical ranking when they are not
+
+You can also force a mode:
+
+```csharp
 services.AddManagedCodeMcpGateway(options =>
 {
-    options.AddTool(
-        "local",
-        AIFunctionFactory.Create(
-            static (string query) => $"github:{query}",
-            new AIFunctionFactoryOptions
-            {
-                Name = "github_search_repositories",
-                Description = "Search GitHub repositories by user query."
-            }));
+    options.SearchStrategy = McpGatewaySearchStrategy.Tokenizer;
 });
 ```
 
-When an index build runs, whether explicitly or through lazy/background warmup, the gateway:
+Or:
 
-- computes a descriptor-document hash per tool
-- asks `IMcpGatewayToolEmbeddingStore` for matching stored vectors
-- generates embeddings only for tools that are missing in the store
-- upserts the newly generated vectors back into the store
+```csharp
+services.AddManagedCodeMcpGateway(options =>
+{
+    options.SearchStrategy = McpGatewaySearchStrategy.Embeddings;
+});
+```
 
-This avoids recalculating tool embeddings on every rebuild while still refreshing them automatically when the descriptor document changes. Stored vectors are scoped to both the descriptor hash and the resolved embedding-generator fingerprint, so changing the provider or model automatically forces regeneration. Query embeddings are still generated at search time from the registered `IEmbeddingGenerator<string, Embedding<float>>`.
+`McpGatewaySearchResult.RankingMode` reports:
 
-## Search Evaluation
+- `vector`
+- `lexical`
+- `browse`
+- `empty`
 
-The repository includes a tokenizer evaluation suite built around a 50-tool catalog with intentionally overlapping verbs such as `search`, `lookup`, `timeline`, and `summary`, while keeping the domain semantics separated in the descriptions.
+## Deeper Docs
 
-Coverage buckets in `tests/ManagedCode.MCPGateway.Tests/Search/McpGatewayTokenizerSearchEvaluationTests.cs`:
+Use these when you need design details rather than package onboarding:
 
-- high relevance
-- borderline / semantically adjacent tools
-- multilingual
-- typo / spelling mistakes
-- weak-intent / underspecified commands
-- irrelevant queries
-
-The evaluation asserts:
-
-- `top1`, `top3`, and `top5`
-- mean reciprocal rank
-- low-confidence behavior for irrelevant queries
-
-The noisy-query buckets intentionally include spelling mistakes and weakly specified commands so the tokenizer path is exercised as a real fallback, not only on clean benchmark phrasing.
-
-Current reference numbers from the repository test corpus:
-
-- `ChatGptO200kBase`: high relevance `top1=95.65%`, `top3=100%`, `top5=100%`, `MRR=0.98`; typo `top1=100%`; weak intent `top1=100%`; irrelevant `low-confidence=100%`
-
-## Supported Sources
-
-- local `AITool` / `AIFunction`
-- HTTP MCP servers
-- stdio MCP servers
-- existing `McpClient` instances
-- deferred `McpClient` factories
-
+- [Architecture overview](docs/Architecture/Overview.md)
+- [ADR-0001: Runtime boundaries and index lifecycle](docs/ADR/ADR-0001-runtime-boundaries-and-index-lifecycle.md)
+- [ADR-0002: Search ranking and query normalization](docs/ADR/ADR-0002-search-ranking-and-query-normalization.md)
+- [ADR-0003: Reusable chat-client and agent auto-discovery modules](docs/ADR/ADR-0003-reusable-chat-client-and-agent-tool-modules.md)
+- [Feature spec: Search query normalization and ranking](docs/Features/SearchQueryNormalizationAndRanking.md)
 
 ## Local Development
 
@@ -725,11 +500,3 @@ Analyzer pass:
 ```bash
 dotnet build ManagedCode.MCPGateway.slnx -c Release --no-restore -p:RunAnalyzers=true
 ```
-
-Detailed TUnit output:
-
-```bash
-dotnet test --solution ManagedCode.MCPGateway.slnx -c Release --no-build --output Detailed --no-progress
-```
-
-This repository uses `TUnit` on top of `Microsoft.Testing.Platform`, so prefer the `dotnet test --solution ...` commands above. Do not assume VSTest-only flags such as `--filter` or `--logger` are available here.

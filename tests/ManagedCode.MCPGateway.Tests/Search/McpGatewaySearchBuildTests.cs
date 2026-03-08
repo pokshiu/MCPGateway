@@ -1,9 +1,9 @@
+using System.Reflection;
 using ManagedCode.MCPGateway.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using ModelContextProtocol.Client;
-using System.Reflection;
 
 namespace ManagedCode.MCPGateway.Tests;
 

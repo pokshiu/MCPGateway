@@ -130,6 +130,7 @@ If no new rule is detected -> do not update the file.
 - When the package requires an initialization step such as index building, provide an ergonomic optional integration path (for example DI extension or hosted background warmup) instead of forcing every consumer to call it manually, and document when manual initialization is still appropriate.
 - Keep documented configuration defaults synchronized with the actual `McpGatewayOptions` defaults; for example, `MaxSearchResults` default is `15`, not stale sample values.
 - Keep the README focused on package usage and onboarding, not internal implementation notes.
+- Keep `README.md` free of unnecessary internal detail; it should stay clear, example-driven, and focused on what consumers need to understand and use the package quickly.
 - Document optional DI dependencies explicitly in README examples so consumers know which services they must register themselves, such as embedding generators.
 - Keep README code examples as real example code blocks, not commented-out pseudo-code; if behavior is optional, show it in a separate example instead of commenting lines inside another snippet.
 - Never leave empty placeholder setup blocks in README examples such as `// gateway configuration`; show a concrete minimal configuration that actually demonstrates the API.
@@ -164,6 +165,7 @@ If no new rule is detected -> do not update the file.
 
 - Follow `.editorconfig` and repository analyzers.
 - Keep warnings clean; repository builds treat warnings as errors.
+- Always treat local and CI builds as `WarningsAsErrors`; never rely on warnings being acceptable, because this repository expects zero-warning output as a hard quality gate.
 - Prefer simple, readable C# over clever abstractions.
 - Prefer modern C# 14 syntax when it improves clarity and keep replacing stale legacy syntax with current idiomatic language constructs instead of preserving older forms by inertia.
 - Prefer straightforward DI-native constructors in public types; avoid redundant constructor chaining that only wraps `new SomeRuntime(...)` behind a second constructor, because in modern C# this adds ceremony without improving clarity.
@@ -179,6 +181,7 @@ If no new rule is detected -> do not update the file.
 - Prefer explicit SOLID object decomposition over large `partial` types; when responsibilities like registry, indexing, invocation, or schema handling can live in dedicated classes, extract real collaborators instead of only splitting files.
 - Keep `McpGateway` focused on search/invoke orchestration only; do not embed registry or mutation responsibilities into the gateway type itself, because that mixes lifecycle/catalog mutation with runtime execution concerns.
 - Keep public API names aligned with package identity `ManagedCode.MCPGateway`.
+- For package-scoped public API members, prefer concise names without repeating the `ManagedCode` brand inside method names when the namespace/package already scopes them, because redundant branding makes the API noisy.
 - Do not duplicate package metadata or version blocks inside project files unless a project-specific override is required.
 - Use constants for stable tool names and protocol-facing identifiers.
 - Never leave stable string literals inline in runtime code; extract named constants for diagnostic codes, messages, modes, keys, tool descriptions, and other durable identifiers so changes stay centralized.
@@ -197,6 +200,8 @@ If no new rule is detected -> do not update the file.
 - Never publish to NuGet from the local machine without explicit user confirmation.
 - Never use destructive git commands without explicit user approval.
 - Never weaken tests, analyzers, or packaging checks to make CI pass.
+- This repository uses `TUnit` on top of `Microsoft.Testing.Platform`, so prefer the `dotnet test --solution ...` commands above. Do not assume VSTest-only flags such as `--filter` or `--logger` are available here.
+
 
 ### Boundaries
 

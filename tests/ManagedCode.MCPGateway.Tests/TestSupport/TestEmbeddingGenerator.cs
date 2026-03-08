@@ -95,6 +95,11 @@ internal sealed class TestEmbeddingGenerator(TestEmbeddingGeneratorOptions? opti
 
     private Embedding<float> CreateEmbedding(string value)
     {
+        if (_options.CreateVector is not null)
+        {
+            return new Embedding<float>(_options.CreateVector(value));
+        }
+
         if (_options.ReturnZeroVectorOnInput?.Invoke(value) == true)
         {
             return new Embedding<float>(new float[Vocabulary.Length]);
@@ -122,6 +127,8 @@ internal sealed class TestEmbeddingGeneratorOptions
     public Func<string, bool>? ThrowOnInput { get; init; }
 
     public Func<string, bool>? ReturnZeroVectorOnInput { get; init; }
+
+    public Func<string, float[]>? CreateVector { get; init; }
 
     public bool ReturnMismatchedBatchCount { get; init; }
 }
