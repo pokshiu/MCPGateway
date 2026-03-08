@@ -138,6 +138,7 @@ If no new rule is detected -> do not update the file.
 ### Skills (ALL TASKS)
 
 - Bootstrap or refresh MCAF skills from the canonical tutorial and raw GitHub skill folders; do not rely on a shell installer because MCAF `v1.2` is URL-first.
+- When the user asks to sync or use all .NET MCAF skills, enumerate the full available .NET skill inventory instead of assuming the minimal recommended bundle is sufficient, because undercounting the skill set causes stale local bootstrap state.
 - Keep repo-local MCAF skills under `.codex/skills/`, not in ad-hoc folders.
 - Keep one workflow per skill folder with a required `SKILL.md`.
 - Keep skill metadata concise and fix the YAML `description` when a skill mis-triggers.
