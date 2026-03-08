@@ -28,6 +28,9 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
+      - name: Restore local tools
+        run: dotnet tool restore
+
       - name: Extract version from Directory.Build.props
         id: version
         shell: bash
@@ -56,6 +59,15 @@ jobs:
 
       - name: Build
         run: dotnet build ManagedCode.MCPGateway.slnx --configuration Release --no-restore
+
+      - name: Analyze
+        run: dotnet build ManagedCode.MCPGateway.slnx --configuration Release --no-restore -p:RunAnalyzers=true
+
+      - name: Verify formatting
+        run: dotnet format ManagedCode.MCPGateway.slnx --verify-no-changes
+
+      - name: Roslynator
+        run: dotnet tool run roslynator analyze src/ManagedCode.MCPGateway/ManagedCode.MCPGateway.csproj tests/ManagedCode.MCPGateway.Tests/ManagedCode.MCPGateway.Tests.csproj
 
       - name: Test
         run: dotnet test --solution ManagedCode.MCPGateway.slnx --configuration Release --no-build --verbosity normal

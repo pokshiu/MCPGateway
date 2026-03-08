@@ -494,6 +494,7 @@ Use these when you need design details rather than package onboarding:
 ## Local Development
 
 ```bash
+dotnet tool restore
 dotnet restore ManagedCode.MCPGateway.slnx
 dotnet build ManagedCode.MCPGateway.slnx -c Release --no-restore
 dotnet test --solution ManagedCode.MCPGateway.slnx -c Release --no-build
@@ -503,4 +504,19 @@ Analyzer pass:
 
 ```bash
 dotnet build ManagedCode.MCPGateway.slnx -c Release --no-restore -p:RunAnalyzers=true
+dotnet tool run roslynator analyze src/ManagedCode.MCPGateway/ManagedCode.MCPGateway.csproj tests/ManagedCode.MCPGateway.Tests/ManagedCode.MCPGateway.Tests.csproj
+dotnet format ManagedCode.MCPGateway.slnx --verify-no-changes
 ```
+
+Coverage and human-readable report:
+
+```bash
+dotnet tool run coverlet tests/ManagedCode.MCPGateway.Tests/bin/Release/net10.0/ManagedCode.MCPGateway.Tests.dll --target "dotnet" --targetargs "test --solution ManagedCode.MCPGateway.slnx -c Release --no-build" --format cobertura --output artifacts/coverage/coverage.cobertura.xml
+dotnet tool run reportgenerator -reports:"artifacts/coverage/coverage.cobertura.xml" -targetdir:"artifacts/coverage-report" -reporttypes:"HtmlSummary;MarkdownSummaryGithub"
+```
+
+The local tool manifest currently owns `roslynator`, `coverlet.console`, `reportgenerator`, `dotnet-stryker`, and `csharpier`.
+
+- `dotnet format` remains the repository's formatter of record.
+- `csharpier` is installed for opt-in checks only and is not part of the default CI path.
+- `dotnet-stryker` is installed for focused mutation runs only and is not part of the default fast-path CI checks.

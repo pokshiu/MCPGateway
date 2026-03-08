@@ -26,14 +26,32 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
+      - name: Restore local tools
+        run: dotnet tool restore
+
       - name: Restore
         run: dotnet restore ManagedCode.MCPGateway.slnx
 
       - name: Build
         run: dotnet build ManagedCode.MCPGateway.slnx --configuration Release --no-restore
 
+      - name: Analyze
+        run: dotnet build ManagedCode.MCPGateway.slnx --configuration Release --no-restore -p:RunAnalyzers=true
+
+      - name: Verify formatting
+        run: dotnet format ManagedCode.MCPGateway.slnx --verify-no-changes
+
+      - name: Roslynator
+        run: dotnet tool run roslynator analyze src/ManagedCode.MCPGateway/ManagedCode.MCPGateway.csproj tests/ManagedCode.MCPGateway.Tests/ManagedCode.MCPGateway.Tests.csproj
+
       - name: Test
         run: dotnet test --solution ManagedCode.MCPGateway.slnx --configuration Release --no-build --verbosity normal --report-trx --results-directory ./artifacts/test-results
+
+      - name: Collect coverage
+        run: dotnet tool run coverlet tests/ManagedCode.MCPGateway.Tests/bin/Release/net10.0/ManagedCode.MCPGateway.Tests.dll --target "dotnet" --targetargs "test --solution ManagedCode.MCPGateway.slnx -c Release --no-build" --format cobertura --output artifacts/coverage/coverage.cobertura.xml
+
+      - name: Render coverage report
+        run: dotnet tool run reportgenerator -reports:"artifacts/coverage/coverage.cobertura.xml" -targetdir:"artifacts/coverage-report" -reporttypes:"HtmlSummary;MarkdownSummaryGithub"
 
       - name: Upload test artifacts
         if: always()
@@ -41,4 +59,14 @@ jobs:
         with:
           name: test-results
           path: ./artifacts/test-results/**
+          retention-days: 5
+
+      - name: Upload coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            ./artifacts/coverage/**
+            ./artifacts/coverage-report/**
           retention-days: 5

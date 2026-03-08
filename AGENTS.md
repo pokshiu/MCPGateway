@@ -80,6 +80,7 @@ If no new rule is detected -> do not update the file.
 ### Commands
 
 - restore: `dotnet restore ManagedCode.MCPGateway.slnx`
+- tool-restore: `dotnet tool restore`
 - build: `dotnet build ManagedCode.MCPGateway.slnx -c Release --no-restore`
 - analyze: `dotnet build ManagedCode.MCPGateway.slnx -c Release --no-restore -p:RunAnalyzers=true`
 - test: `dotnet test --solution ManagedCode.MCPGateway.slnx -c Release --no-build`
@@ -89,7 +90,9 @@ If no new rule is detected -> do not update the file.
 - test-runner-help: `tests/ManagedCode.MCPGateway.Tests/bin/Release/net10.0/ManagedCode.MCPGateway.Tests --help`
 - format: `dotnet format ManagedCode.MCPGateway.slnx`
 - format-check: `dotnet format ManagedCode.MCPGateway.slnx --verify-no-changes`
-- coverage: `dotnet test --solution ManagedCode.MCPGateway.slnx -c Release --no-build --coverage --coverage-output-format cobertura --results-directory ./artifacts/coverage`
+- roslynator-analyze: `dotnet tool run roslynator analyze src/ManagedCode.MCPGateway/ManagedCode.MCPGateway.csproj tests/ManagedCode.MCPGateway.Tests/ManagedCode.MCPGateway.Tests.csproj`
+- coverage: `dotnet tool run coverlet tests/ManagedCode.MCPGateway.Tests/bin/Release/net10.0/ManagedCode.MCPGateway.Tests.dll --target "dotnet" --targetargs "test --solution ManagedCode.MCPGateway.slnx -c Release --no-build" --format cobertura --output artifacts/coverage/coverage.cobertura.xml`
+- coverage-report: `dotnet tool run reportgenerator -reports:"artifacts/coverage/coverage.cobertura.xml" -targetdir:"artifacts/coverage-report" -reporttypes:"HtmlSummary;MarkdownSummaryGithub"`
 
 ### Rule Precedence
 
@@ -109,7 +112,7 @@ If no new rule is detected -> do not update the file.
 
 - Keep the standardized workflow skills first; use the extra installed inventory only when the repository actually wires that tool into commands, CI, docs, or an explicit user request.
 - Core .NET routing: `mcaf-dotnet`, `mcaf-dotnet-features`, `mcaf-testing`, `mcaf-dotnet-tunit`
-- Standardized .NET toolchain: `mcaf-dotnet-analyzer-config`, `mcaf-dotnet-code-analysis`, `mcaf-dotnet-format`, `mcaf-dotnet-roslynator`, `mcaf-dotnet-codeql`
+- Standardized .NET toolchain: `mcaf-dotnet-analyzer-config`, `mcaf-dotnet-code-analysis`, `mcaf-dotnet-format`, `mcaf-dotnet-roslynator`, `mcaf-dotnet-coverlet`, `mcaf-dotnet-reportgenerator`, `mcaf-dotnet-codeql`
 - Extended .NET catalog: `mcaf-dotnet-archunitnet`, `mcaf-dotnet-coverlet`, `mcaf-dotnet-csharpier`, `mcaf-dotnet-meziantou-analyzer`, `mcaf-dotnet-mstest`, `mcaf-dotnet-netarchtest`, `mcaf-dotnet-reportgenerator`, `mcaf-dotnet-semgrep`, `mcaf-dotnet-stryker`, `mcaf-dotnet-stylecop-analyzers`, `mcaf-dotnet-xunit`
 - Quality and maintainability: `mcaf-dotnet-quality-ci`, `mcaf-dotnet-complexity`, `mcaf-solid-maintainability`
 - Governance and docs: `mcaf-solution-governance`, `mcaf-architecture-overview`, `mcaf-adr-writing`, `mcaf-feature-spec`, `mcaf-ci-cd`
@@ -199,6 +202,7 @@ If no new rule is detected -> do not update the file.
 - Test framework in this repository is TUnit. Never add or keep xUnit here.
 - This repository uses `TUnit` on `Microsoft.Testing.Platform`; never use VSTest-only flags such as `--filter` or `--logger`, because they are not supported here.
 - For TUnit solution runs, always invoke `dotnet test --solution ...`; do not pass the solution path positionally.
+- Coverage in this repository uses the local `coverlet.console` tool against the built test assembly, then renders human-readable output with the local `reportgenerator` tool.
 - Every behavior change must include or update tests in `tests/ManagedCode.MCPGateway.Tests/`.
 - Add tests only when they close a meaningful behavior or regression gap; avoid low-signal tests that only increase count without improving confidence.
 - Keep tests focused on real gateway behavior:
@@ -211,7 +215,9 @@ If no new rule is detected -> do not update the file.
 - Do not remove tests to get green builds.
 - Keep `global.json` configured for `Microsoft.Testing.Platform` when TUnit is used.
 - At the end of implementation work, run code-size and quality verification with `cloc`, `roslynator`, and the repository's strict .NET build/test checks, then fix actionable findings so oversized files and quality drift do not accumulate.
+- `CSharpier` and `Stryker.NET` are installed as opt-in local tools for focused checks; they are not default formatter or default fast-path CI gates in this repository.
 - Run verification in this order:
+  - tool-restore
   - restore
   - build
   - test

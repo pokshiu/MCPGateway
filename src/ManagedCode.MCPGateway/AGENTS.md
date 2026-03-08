@@ -44,8 +44,10 @@ For this .NET project:
 - `mcaf-dotnet-analyzer-config`
 - `mcaf-dotnet-code-analysis`
 - `mcaf-dotnet-codeql`
+- `mcaf-dotnet-coverlet`
 - `mcaf-dotnet-format`
 - `mcaf-dotnet-features`
+- `mcaf-dotnet-reportgenerator`
 - `mcaf-dotnet-roslynator`
 - `mcaf-testing`
 - `mcaf-dotnet-tunit`
